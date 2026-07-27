@@ -49,8 +49,17 @@ export const adjustProductStock = async (adjustmentData) => {
   });
 };
 
+// ৩. স্টক এলার্ট লিস্ট আনা
 export const fetchStockAlerts = async (params = {}) => {
   const queryString = new URLSearchParams(params).toString();
   const endpoint = `/stock-alerts${queryString ? `?${queryString}` : ""}`;
   return request(endpoint, { method: "GET" });
+};
+
+// ৪. কুইক স্টক আপডেট করা (set, add, subtract)
+export const updateProductStock = async (productId, updateData) => {
+  return request(`/products/${productId}/update-stock`, {
+    method: "POST",
+    body: JSON.stringify(updateData),
+  });
 };

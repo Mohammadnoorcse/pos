@@ -1,13 +1,11 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { Search, Download, Printer, ChevronDown, Loader2 } from "lucide-react";
+import { Search, Download, Printer, ChevronDown, Loader2, Edit3, X, Check } from "lucide-react";
 import { ScallopBorder } from "../../shared/ScallopBorder";
 import { COLORS, PETALS, FONTS } from "../../../constants";
 import { formatCurrency } from "../../../utils";
-import { fetchProductStocks } from "../../../api/productStockService";
+import { fetchProductStocks, updateProductStock } from "../../../api/productStockService";
 
 function StockFilterSelect({ value, onChange, options, accentColor = COLORS.peacock }) {
-  
-  
   return (
     <div className="relative">
       <select
@@ -50,7 +48,14 @@ export function ProductStocksPage() {
   const [query, setQuery] = useState("");
   const [perPage, setPerPage] = useState("100");
 
-  
+  // Stock Update Modal States
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [selectedItem, setSelectedItem] = useState(null);
+  const [updateAction, setUpdateAction] = useState("add"); // 'add', 'subtract', 'set'
+  const [updateQty, setUpdateQty] = useState("");
+  const [isUpdating, setIsUpdating] = useState(false);
+  const [updateError, setUpdateError] = useState("");
+
   const loadStocks = useCallback(async () => {
     try {
       setLoading(true);
@@ -67,10 +72,8 @@ export function ProductStocksPage() {
 
       const response = await fetchProductStocks(params);
       
-      // Laravel Paginate Response Payload Structure
       const stockData = response.data?.data || response.data || [];
       setStocks(stockData);
-      console.log('product stock',stockData)
 
       if (response.summary) {
         setSummary(response.summary);
@@ -86,11 +89,51 @@ export function ProductStocksPage() {
   useEffect(() => {
     const timer = setTimeout(() => {
       loadStocks();
-    }, 300); // Search Input Debounce delay
+    }, 300);
 
     return () => clearTimeout(timer);
   }, [loadStocks]);
-  
+
+  // Modal Open Handler
+  const handleOpenModal = (item) => {
+    setSelectedItem(item);
+    setUpdateAction("add");
+    setUpdateQty("");
+    setUpdateError("");
+    setIsModalOpen(true);
+  };
+
+  // Submit Stock Update
+  const handleSaveStock = async (e) => {
+    e.preventDefault();
+    if (!updateQty || isNaN(updateQty) || Number(updateQty) < 0) {
+      setUpdateError("সঠিক পরিমাণের সংখ্যা লিখুন।");
+      return;
+    }
+
+    try {
+      setIsUpdating(true);
+      setUpdateError("");
+
+      const productId = selectedItem.product_id || selectedItem.id;
+      const targetBranchId = selectedItem.branch_id || branchId || 1; // Default branch fallback
+
+      await updateProductStock(productId, {
+        branch_id: targetBranchId,
+        product_variant_id: selectedItem.product_variant_id || null,
+        quantity: parseInt(updateQty, 10),
+        action: updateAction,
+      });
+
+      setIsModalOpen(false);
+      loadStocks(); // Reload updated table & summary
+    } catch (err) {
+      console.error("Failed to update stock:", err);
+      setUpdateError(err.message || "স্টক আপডেট করতে ব্যর্থ হয়েছে।");
+    } finally {
+      setIsUpdating(false);
+    }
+  };
 
   return (
     <div
@@ -126,23 +169,19 @@ export function ProductStocksPage() {
             accentColor={COLORS.peacock}
           />
 
-          {/* Brand Filter Placeholder */}
+          {/* Brand Filter */}
           <StockFilterSelect
             value={brandId}
             onChange={(val) => setBrandId(val)}
-            options={[
-              { value: "", label: "All Brands" },
-            ]}
+            options={[{ value: "", label: "All Brands" }]}
             accentColor={COLORS.marigold}
           />
 
-          {/* Category Filter Placeholder */}
+          {/* Category Filter */}
           <StockFilterSelect
             value={categoryId}
             onChange={(val) => setCategoryId(val)}
-            options={[
-              { value: "", label: "All Categories" },
-            ]}
+            options={[{ value: "", label: "All Categories" }]}
             accentColor={COLORS.rust}
           />
 
@@ -306,22 +345,29 @@ export function ProductStocksPage() {
                 >
                   Alert Qty
                 </th>
+                <th
+                  className="font-bold text-[11px] uppercase tracking-wide pb-2.5 px-2.5 border-b text-center"
+                  style={{ borderColor: COLORS.line }}
+                >
+                  Action
+                </th>
               </tr>
             </thead>
             <tbody>
               {stocks.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={6}
+                    colSpan={7}
                     className="py-8 text-center text-[13px]"
                     style={{ color: COLORS.muted }}
                   >
-                    কোন প্রোডাক্টের স্টক তথ্য পাওয়া যায়নি।
+                    কোন প্রোডাক্টের স্টক তথ্য পাওয়া যায়নি।
                   </td>
                 </tr>
               ) : (
                 stocks.map((item, i) => {
-                  const product = item.product || {};
+                  const product = item.product || item;
+                  const currentQuantity = item.quantity ?? item.stock_qty ?? 0;
                   const variantValues = item.variant?.values?.map((v) => v.name).join(", ");
 
                   return (
@@ -366,7 +412,7 @@ export function ProductStocksPage() {
                         <span
                           className="text-[11px] font-bold px-2.5 py-1 rounded-full"
                           style={
-                            item.quantity <= (product.alert_quantity || 5)
+                            currentQuantity <= (product.alert_quantity || 5)
                               ? {
                                   backgroundColor: COLORS.vermillionTint,
                                   color: COLORS.vermillion,
@@ -377,7 +423,7 @@ export function ProductStocksPage() {
                                 }
                           }
                         >
-                          {item.quantity}
+                          {currentQuantity}
                         </span>
                       </td>
                       <td
@@ -389,6 +435,20 @@ export function ProductStocksPage() {
                       >
                         {product.alert_quantity || 0}
                       </td>
+                      <td className="py-3 px-2.5 text-center">
+                        <button
+                          onClick={() => handleOpenModal(item)}
+                          className="p-1.5 rounded-lg border hover:opacity-80 transition-opacity"
+                          title="Update Stock"
+                          style={{
+                            backgroundColor: COLORS.paper,
+                            borderColor: COLORS.line,
+                            color: COLORS.peacock,
+                          }}
+                        >
+                          <Edit3 size={14} />
+                        </button>
+                      </td>
                     </tr>
                   );
                 })
@@ -397,6 +457,119 @@ export function ProductStocksPage() {
           </table>
         )}
       </div>
+
+      {/* STOCK UPDATE MODAL */}
+      {isModalOpen && selectedItem && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+          <div
+            className="w-full max-w-md rounded-2xl border shadow-2xl overflow-hidden p-6 relative animate-in fade-in zoom-in duration-150"
+            style={{ backgroundColor: COLORS.panel, borderColor: COLORS.line }}
+          >
+            {/* Close Button */}
+            <button
+              onClick={() => setIsModalOpen(false)}
+              className="absolute top-4 right-4 text-slate-400 hover:text-slate-600"
+            >
+              <X size={18} />
+            </button>
+
+            <h3
+              className="text-lg font-bold mb-1"
+              style={{ fontFamily: FONTS.HEAD, color: COLORS.forestDark }}
+            >
+              Update Stock Quantity
+            </h3>
+            <p className="text-[13px] mb-4" style={{ color: COLORS.muted }}>
+              Product: <span className="font-semibold text-slate-800">{(selectedItem.product || selectedItem).title}</span>
+            </p>
+
+            {updateError && (
+              <div className="mb-3 p-2.5 rounded-lg text-[12px] bg-red-50 text-red-600 border border-red-200">
+                {updateError}
+              </div>
+            )}
+
+            <form onSubmit={handleSaveStock} className="space-y-4">
+              {/* Action Selector */}
+              <div>
+                <label className="block text-[12px] font-semibold mb-1.5" style={{ color: COLORS.ink }}>
+                  Update Action
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    { id: "add", label: "Add (+)" },
+                    { id: "subtract", label: "Subtract (-)" },
+                    { id: "set", label: "Set Exact" },
+                  ].map((act) => (
+                    <button
+                      key={act.id}
+                      type="button"
+                      onClick={() => setUpdateAction(act.id)}
+                      className={`py-2 text-[12px] font-semibold rounded-lg border transition-all ${
+                        updateAction === act.id ? "shadow-sm" : ""
+                      }`}
+                      style={{
+                        backgroundColor: updateAction === act.id ? COLORS.peacock : COLORS.paper,
+                        color: updateAction === act.id ? "#ffffff" : COLORS.ink,
+                        borderColor: updateAction === act.id ? COLORS.peacock : COLORS.line,
+                      }}
+                    >
+                      {act.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Quantity Input */}
+              <div>
+                <label className="block text-[12px] font-semibold mb-1.5" style={{ color: COLORS.ink }}>
+                  Quantity
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  required
+                  value={updateQty}
+                  onChange={(e) => setUpdateQty(e.target.value)}
+                  placeholder="Enter quantity..."
+                  className="w-full px-3 py-2 rounded-lg border outline-none text-[13px]"
+                  style={{
+                    backgroundColor: COLORS.paper,
+                    borderColor: COLORS.line,
+                    color: COLORS.ink,
+                    fontFamily: FONTS.MONO,
+                  }}
+                />
+              </div>
+
+              {/* Modal Actions */}
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setIsModalOpen(false)}
+                  className="px-4 py-2 rounded-lg text-[12.5px] font-semibold border hover:bg-slate-100"
+                  style={{ borderColor: COLORS.line, color: COLORS.ink }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isUpdating}
+                  className="px-4 py-2 rounded-lg text-[12.5px] font-semibold text-white flex items-center gap-1.5 shadow-md disabled:opacity-50"
+                  style={{ backgroundColor: COLORS.forest }}
+                >
+                  {isUpdating ? (
+                    <Loader2 size={14} className="animate-spin" />
+                  ) : (
+                    <Check size={14} />
+                  )}
+                  Save Changes
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

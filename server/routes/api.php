@@ -58,6 +58,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // Stock
     Route::get('/product-stocks', [ProductStockController::class, 'index']);
     Route::post('/product-stocks/adjust', [ProductStockController::class, 'adjust']);
+    Route::post('/products/{product}/update-stock', [ProductStockController::class, 'updateStock']);
     Route::get('/stock-alerts', [StockAlertController::class, 'index']);
 
     // Product Transfer (B2B/B2G + G2B) & Transfered Histories
@@ -80,7 +81,6 @@ Route::middleware('auth:sanctum')->group(function () {
     // Sales
     Route::post('/sales/{sale}/payments', [SaleController::class, 'recordPayment']);
     Route::apiResource('sales', SaleController::class);
-    Route::apiResource('customers', CustomerController::class);
     Route::get('/sales/{sale}/returnable-items', [SaleController::class, 'returnableItems']);
 
     Route::prefix('sale-returns')->group(function () {
@@ -93,5 +93,13 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/damage-products', [DamageController::class, 'getProducts']);
     Route::get('/damage-records', [DamageController::class, 'index']);
     Route::post('/damage-records', [DamageController::class, 'store']);
+
+    // ================= Customer API Routes =================
+    Route::get('/customers', [CustomerController::class, 'index']);
+    Route::post('/customers', [CustomerController::class, 'store']);
+    Route::get('/customers/{customer}', [CustomerController::class, 'show']);
+    Route::put('/customers/{customer}', [CustomerController::class, 'update']);
+    Route::delete('/customers/{customer}', [CustomerController::class, 'destroy']);
+    Route::get('/customers/{customer}/history', [CustomerController::class, 'history']);
 
 });

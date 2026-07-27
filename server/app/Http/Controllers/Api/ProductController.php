@@ -16,30 +16,50 @@ use Illuminate\Support\Str;
 class ProductController extends Controller
 {
     public function index(Request $request)
-    {
-        $query = Product::with(['branch', 'brand', 'category', 'unitType']);
+{
+    // ১. কারেন্ট ব্রাঞ্চ আইডি নির্ধারণ (Request থেকে অথবা লগইন ইউজারের ব্রাঞ্চ থেকে)
+    $branchId = $request->branch_id ?? auth()->user()?->branch_id;
 
-        if ($request->filled('search')) {
-            $search = $request->search;
-            $query->where(function ($q) use ($search) {
-                $q->where('title', 'like', "%{$search}%")
-                  ->orWhere('barcode', 'like', "%{$search}%");
-            });
-        }
-        if ($request->filled('branch_id')) {
-            $query->where('branch_id', $request->branch_id);
-        }
-        if ($request->filled('category_id')) {
-            $query->where('category_id', $request->category_id);
-        }
-        if ($request->filled('brand_id')) {
-            $query->where('brand_id', $request->brand_id);
-        }
+    $query = Product::with(['branch', 'brand', 'category', 'unitType']);
 
-        $products = $query->orderByDesc('id')->paginate($request->integer('per_page', 25));
-
-        return response()->json($products);
+    // ২. বর্তমান ব্রাঞ্চের স্টক যোগ করার জন্য (branch_stock)
+    if ($branchId) {
+        $query->withSum(['stocks as branch_stock' => function ($q) use ($branchId) {
+            $q->where('branch_id', $branchId);
+        }], 'quantity');
+    } else {
+        $query->withSum('stocks as branch_stock', 'quantity');
     }
+
+    // ৩. সব ব্রাঞ্চের সর্বমোট স্টক যোগ করার জন্য (total_stock)
+    $query->withSum('stocks as total_stock', 'quantity');
+
+    // সার্চ ফিল্টার (Title / Barcode)
+    if ($request->filled('search')) {
+        $search = $request->search;
+        $query->where(function ($q) use ($search) {
+            $q->where('title', 'like', "%{$search}%")
+              ->orWhere('barcode', 'like', "%{$search}%");
+        });
+    }
+
+    // ফিল্টারিং
+    if ($request->filled('branch_id')) {
+        $query->where('branch_id', $request->branch_id);
+    }
+
+    if ($request->filled('category_id')) {
+        $query->where('category_id', $request->category_id);
+    }
+
+    if ($request->filled('brand_id')) {
+        $query->where('brand_id', $request->brand_id);
+    }
+
+    $products = $query->orderByDesc('id')->paginate($request->integer('per_page', 25));
+
+    return response()->json($products);
+}
 
     public function store(Request $request)
     {

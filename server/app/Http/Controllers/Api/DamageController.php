@@ -5,20 +5,22 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\DamageRecord;
 use App\Models\Product;
+use App\Models\ProductStock;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 
 class DamageController extends Controller
 {
-public function index(Request $request)
+    public function index(Request $request)
     {
         $search = $request->query('search', '');
         $limit = (int) $request->query('limit', 100);
 
-        // Fetch records with relationships
         $records = DamageRecord::with(['product', 'branch', 'unitType', 'variation'])
             ->when($search, function ($query) use ($search) {
                 $query->whereHas('product', function ($q) use ($search) {
-                    $q->where('title', 'LIKE', "%{$search}%"); // 'name' এর জায়গায় 'title'
+                    $q->where('title', 'LIKE', "%{$search}%");
                 })
                 ->orWhereHas('branch', function ($q) use ($search) {
                     $q->where('name', 'LIKE', "%{$search}%");
@@ -28,7 +30,6 @@ public function index(Request $request)
             ->latest()
             ->paginate($limit);
 
-        // Transform response for React table
         $formattedData = $records->getCollection()->transform(function ($item) {
             return [
                 'id' => $item->id,
@@ -37,7 +38,7 @@ public function index(Request $request)
                 'unit_id' => $item->unit_id,
                 'variation_id' => $item->variation_id,
                 'place' => $item->branch->name ?? $item->place ?? 'My Shop',
-                'product' => $item->product->title ?? '—', // Product model-এর 'title' field
+                'product' => $item->product->title ?? '—',
                 'variation_name' => $item->variation->name ?? null,
                 'unit_name' => $item->unitType->name ?? $item->unit,
                 'lot' => $item->lot_number,
@@ -63,7 +64,7 @@ public function index(Request $request)
     }
 
     /**
-     * Store a newly created damage record in storage.
+     * Store a newly created damage record AND decrement product stock.
      */
     public function store(Request $request)
     {
@@ -79,15 +80,46 @@ public function index(Request $request)
             'discount' => 'nullable|string',
             'vat' => 'nullable|string',
             'barcode' => 'nullable|string',
-            'quantity' => 'required|numeric',
+            'quantity' => 'required|numeric|min:0.01',
             'unit' => 'nullable|string',
             'reason' => 'required|string',
         ]);
 
-        $damageRecord = DamageRecord::create($validated);
+        $damageRecord = DB::transaction(function () use ($validated) {
+            // 1) Lock the relevant stock row so concurrent requests can't
+            //    both pass the "enough stock" check at once.
+            $stockQuery = ProductStock::where('product_id', $validated['product_id'])
+                ->when(
+                    !empty($validated['branch_id']),
+                    fn ($q) => $q->where('branch_id', $validated['branch_id'])
+                )
+                ->when(
+                    !empty($validated['variation_id']),
+                    fn ($q) => $q->where('product_variant_id', $validated['variation_id'])
+                )
+                ->lockForUpdate();
+
+            $stock = $stockQuery->first();
+
+            if (!$stock || $stock->quantity < $validated['quantity']) {
+                throw ValidationException::withMessages([
+                    'quantity' => 'Not enough stock available to record this damage. Current stock: ' . ($stock->quantity ?? 0),
+                ]);
+            }
+
+            // 2) Deduct the damaged quantity from stock.
+            $stock->decrement('quantity', $validated['quantity']);
+
+            // 3) Keep the product's aggregate stock_qty column (if you use one) in sync.
+            Product::where('id', $validated['product_id'])
+                ->decrement('stock_qty', $validated['quantity']);
+
+            // 4) Finally create the damage record.
+            return DamageRecord::create($validated);
+        });
 
         return response()->json([
-            'message' => 'Damage record created successfully',
+            'message' => 'Damage record created and stock updated successfully',
             'data' => $damageRecord
         ], 201);
     }
@@ -101,10 +133,10 @@ public function index(Request $request)
         $limit = (int) $request->query('limit', 100);
 
         $products = Product::when($search, function ($query) use ($search) {
-                $query->where('title', 'LIKE', "%{$search}%") // 'title' কলামে সার্চ করা হচ্ছে
+                $query->where('title', 'LIKE', "%{$search}%")
                       ->orWhere('barcode', 'LIKE', "%{$search}%");
             })
-            ->select('id', 'title as name', 'barcode') // 'title as name' দিলে ফ্রন্টএন্ডে name হিসেবেই যাবে
+            ->select('id', 'title as name', 'barcode')
             ->orderBy('title', 'asc')
             ->paginate($limit);
 

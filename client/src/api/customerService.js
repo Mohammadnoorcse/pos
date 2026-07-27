@@ -24,6 +24,10 @@ const request = async (endpoint, options = {}) => {
   return response.json();
 };
 
+// ==========================================
+// 👤 CUSTOMER API SERVICES
+// ==========================================
+
 // ১. কাস্টমার লিস্ট আনা (ফিল্টারিং, সার্চ ও পেজিনেশন সহ)
 export const fetchCustomers = async (params = {}) => {
   const queryString = new URLSearchParams(params).toString();
@@ -36,7 +40,12 @@ export const fetchCustomerDetails = async (id) => {
   return request(`/customers/${id}`, { method: "GET" });
 };
 
-// ৩. নতুন কাস্টমার তৈরি করা
+// ৩. কাস্টমারের সম্পূর্ণ হিস্ট্রি, লেনদেন টাইমলাইন ও কেনা প্রোডাক্ট সামারি আনা
+export const fetchCustomerHistory = async (id) => {
+  return request(`/customers/${id}/history`, { method: "GET" });
+};
+
+// ৪. নতুন কাস্টমার তৈরি করা
 export const createCustomer = async (customerData) => {
   return request("/customers", {
     method: "POST",
@@ -44,7 +53,7 @@ export const createCustomer = async (customerData) => {
   });
 };
 
-// ৪. কাস্টমার তথ্য আপডেট করা
+// ৫. কাস্টমার তথ্য আপডেট করা
 export const updateCustomer = async (id, customerData) => {
   return request(`/customers/${id}`, {
     method: "PUT",
@@ -52,9 +61,21 @@ export const updateCustomer = async (id, customerData) => {
   });
 };
 
-// ৫. কাস্টমার ডিলিট করা
+// ৬. কাস্টমার ডিলিট করা
 export const deleteCustomer = async (id) => {
   return request(`/customers/${id}`, {
     method: "DELETE",
   });
+};
+
+// ==========================================
+// 📦 PRODUCT API SERVICES
+// ==========================================
+
+// ৭. প্রোডাক্ট লিস্ট আনা (কারেন্ট ব্রাঞ্চ স্টক ও টোটাল স্টক সহ)
+export const fetchProducts = async (params = {}) => {
+  // params উদাহরণ: { branch_id: 1, search: 'ji hujur', per_page: 25 }
+  const queryString = new URLSearchParams(params).toString();
+  const endpoint = `/products${queryString ? `?${queryString}` : ""}`;
+  return request(endpoint, { method: "GET" });
 };

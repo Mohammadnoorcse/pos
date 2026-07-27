@@ -19,9 +19,9 @@ class SaleItem extends Model
     }
 
     public function returns()
-{
-    return $this->hasMany(SaleReturn::class);
-}
+    {
+        return $this->hasMany(SaleReturn::class);
+    }
 
     public function getReturnedQuantityAttribute()
     {
@@ -31,5 +31,11 @@ class SaleItem extends Model
     public function getRemainingQuantityAttribute()
     {
         return $this->quantity - $this->returned_quantity;
+    }
+
+
+    public function productVariant()
+    {
+        return $this->belongsTo(ProductVariant::class);
     }
 }

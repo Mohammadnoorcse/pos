@@ -30,22 +30,15 @@ import {
   RotateCcw,
   Loader2,
 } from "lucide-react";
-import ReturnModal from "./ReturnModal"
-// ---------------------------------------------------------------------------
-// API SERVICES
-// Adjust the relative paths below to match where these files live in your
-// project (e.g. "../services/productService").
-// ---------------------------------------------------------------------------
+import ReturnModal from "./ReturnModal";
+
 import { fetchProducts } from "../../../api/productService";
 import { fetchCategories } from "../../../api/categoryService";
 import { fetchBrands } from "../../../api/brandService";
-import {
-  fetchCustomers,
-  createCustomer,
-} from "../../../api/customerService";
+import { fetchCustomers, createCustomer } from "../../../api/customerService";
 import { createSale } from "../../../api/saleService";
 
-/* Same "Rickshaw-art ledger" palette used across the app */
+/* Rickshaw-art ledger palette */
 const C = {
   paper: "#FFF8ED",
   panel: "#FFFFFF",
@@ -144,10 +137,6 @@ function usePrintStyle() {
   }, []);
 }
 
-// ---------------------------------------------------------------------------
-// Small debounce hook — used for the product/customer search boxes so we
-// don't fire a request on every keystroke.
-// ---------------------------------------------------------------------------
 function useDebouncedValue(value, delay = 400) {
   const [debounced, setDebounced] = React.useState(value);
   React.useEffect(() => {
@@ -157,11 +146,6 @@ function useDebouncedValue(value, delay = 400) {
   return debounced;
 }
 
-// ---------------------------------------------------------------------------
-// Reads the logged-in user object from localStorage and returns their
-// branch_id. Adjust the localStorage key ("user") if your auth flow stores
-// it under a different key (e.g. "auth_user").
-// ---------------------------------------------------------------------------
 function getBranchId() {
   try {
     const raw = localStorage.getItem("user");
@@ -173,20 +157,23 @@ function getBranchId() {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Normalizers — the backend's field names may differ from what this UI
-// expects. Adjust these mapping functions to match your actual API
-// response shape (checked via console.log on first load if unsure).
-// ---------------------------------------------------------------------------
+/**
+ * Normalizes backend product data.
+ * Prioritizes 'title' field for Real Name and includes stock details.
+ */
 function normalizeProduct(p) {
-  const stock = p.stock ?? p.quantity ?? p.stock_quantity ?? 0;
+  const currentStock = Number(p.stock_in_branch ?? p.stock_qty ?? p.stock ?? p.quantity ?? 0);
+  const totalStock = Number(p.total_stock ?? p.total_stock_qty ?? currentStock);
+  const alertQty = Number(p.alert_quantity ?? p.low_stock_threshold ?? 10);
+
   return {
     id: p.id,
-    name: p.name ?? p.product_name ?? "Unnamed",
-    price: Number(p.price ?? p.selling_price ?? p.sale_price ?? 0),
-    stock,
-    low: stock > 0 && stock <= (p.low_stock_threshold ?? 10),
-    img: p.image_url || p.thumbnail || "📦",
+    name: p.title ?? p.name ?? p.product_name ?? "Unnamed Product",
+    price: Number(p.selling_price ?? p.price ?? p.sale_price ?? 0),
+    stock: currentStock,
+    totalStock: totalStock,
+    low: currentStock > 0 && currentStock <= alertQty,
+    img: p.image_path || p.image_url || p.thumbnail || "📦",
     barcode: p.barcode ?? p.sku ?? null,
     category_id: p.category_id ?? p.category?.id ?? null,
     brand_id: p.brand_id ?? p.brand?.id ?? null,
@@ -211,8 +198,6 @@ function normalizeCustomer(c) {
   };
 }
 
-// Pull a list out of whatever shape the API returns:
-// { data: [...] }, { data: { data: [...] } } (Laravel paginator), or a bare array.
 function extractList(res) {
   if (Array.isArray(res)) return res;
   if (Array.isArray(res?.data)) return res.data;
@@ -224,7 +209,13 @@ const petals = [C.magenta, C.marigold, C.peacock];
 
 function ScallopBorder({ id }) {
   return (
-    <svg className="absolute top-0 left-0 right-0" width="100%" height="7" preserveAspectRatio="none" viewBox="0 0 30 7">
+    <svg
+      className="absolute top-0 left-0 right-0"
+      width="100%"
+      height="7"
+      preserveAspectRatio="none"
+      viewBox="0 0 30 7"
+    >
       <defs>
         <pattern id={id} width="30" height="7" patternUnits="userSpaceOnUse">
           <circle cx="5" cy="0" r="4.2" fill={petals[0]} />
@@ -256,7 +247,10 @@ function Stepper({ value, onIncrement, onDecrement }) {
       >
         <Minus size={12} />
       </button>
-      <span className="w-6 text-center text-[13px] font-bold" style={{ fontFamily: FONT_MONO }}>
+      <span
+        className="w-6 text-center text-[13px] font-bold"
+        style={{ fontFamily: FONT_MONO }}
+      >
         {value}
       </span>
       <button
@@ -274,63 +268,91 @@ function ProductCard({ p, i, onAdd }) {
   return (
     <div
       onClick={() => onAdd(p)}
-      className="relative rounded-xl border overflow-hidden cursor-pointer group"
+      className="relative rounded-xl border overflow-hidden cursor-pointer group flex flex-col justify-between"
       style={{ backgroundColor: C.panel, borderColor: C.line }}
     >
       <ScallopBorder id={`p-scallop-${i}`} />
+      
       {p.low && (
         <span
           className="absolute top-2.5 right-2.5 text-[9.5px] font-bold px-2 py-0.5 rounded-full z-10"
           style={{ backgroundColor: C.vermillionTint, color: C.vermillion }}
         >
-          {p.stock} left
+          Low: {p.stock} left
         </span>
       )}
+
       <div
-        className="h-20 flex items-center justify-center text-3xl mt-1 overflow-hidden"
+        className="h-20 flex items-center justify-center text-3xl mt-1 overflow-hidden shrink-0"
         style={{ backgroundColor: C.paper }}
       >
-        {p.img && p.img.startsWith("http") ? (
-          <img src={p.img} alt={p.name} className="w-full h-full object-cover" />
+        {p.img && (p.img.startsWith("http") || p.img.startsWith("/")) ? (
+          <img
+            src={p.img}
+            alt={p.name}
+            className="w-full h-full object-cover"
+          />
         ) : (
           p.img
         )}
       </div>
-      <div className="p-2.5">
-        <div className="text-[12.5px] font-semibold leading-snug line-clamp-2 min-h-[32px]">{p.name}</div>
-        <div className="flex items-center justify-between mt-1.5">
-          <span className="text-[13px] font-bold" style={{ color: C.magenta, fontFamily: FONT_MONO }}>
-            ৳{p.price}
-          </span>
-          {!p.low && (
-            <span className="text-[10px]" style={{ color: C.muted }}>
-              {p.stock} pcs
-            </span>
+
+      <div className="p-2.5 flex-1 flex flex-col justify-between">
+        <div>
+          {/* Real Title / Name Display */}
+          <div className="text-[12.5px] font-bold leading-snug line-clamp-2 min-h-[32px]" title={p.name}>
+            {p.name}
+          </div>
+          {p.barcode && (
+            <div className="text-[10px] font-mono text-slate-500 mt-0.5 flex items-center gap-1">
+              <Barcode size={10} /> {p.barcode}
+            </div>
           )}
         </div>
+
+        <div className="mt-2 pt-1 border-t border-dashed" style={{ borderColor: C.line }}>
+          <div className="flex items-center justify-between">
+            <span
+              className="text-[13px] font-bold"
+              style={{ color: C.magenta, fontFamily: FONT_MONO }}
+            >
+              ৳{p.price}
+            </span>
+          </div>
+
+          {/* Current Stock vs Total Stock Display */}
+          <div className="flex items-center justify-between text-[10px] mt-1 font-semibold" style={{ color: C.muted }}>
+            <span>Stock: <strong style={{ color: C.ink }}>{p.stock}</strong></span>
+            <span>Total: <strong style={{ color: C.plum }}>{p.totalStock}</strong></span>
+          </div>
+        </div>
       </div>
+
       <div
         className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity flex items-end justify-center pb-2.5"
-        style={{ background: "linear-gradient(180deg, rgba(58,25,48,0) 50%, rgba(58,25,48,0.06) 100%)" }}
+        style={{
+          background: "linear-gradient(180deg, rgba(58,25,48,0) 50%, rgba(58,25,48,0.1) 100%)",
+        }}
       >
         <span
-          className="text-[11px] font-bold text-white px-3 py-1.5 rounded-full flex items-center gap-1"
+          className="text-[11px] font-bold text-white px-3 py-1.5 rounded-full flex items-center gap-1 shadow-md"
           style={{ backgroundColor: C.plum }}
         >
-          <Plus size={11} /> Add
+          <Plus size={11} /> Add to Cart
         </span>
       </div>
     </div>
   );
 }
 
-/* Responsive modal shell — full-width sheet on mobile,
-   centered card on larger screens. Scallop signature on top. */
 function Modal({ title, subtitle, onClose, children, wide }) {
   return (
     <div
       className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4"
-      style={{ backgroundColor: "rgba(43,35,32,0.45)", backdropFilter: "blur(2px)" }}
+      style={{
+        backgroundColor: "rgba(43,35,32,0.45)",
+        backdropFilter: "blur(2px)",
+      }}
       onClick={onClose}
     >
       <div
@@ -341,7 +363,10 @@ function Modal({ title, subtitle, onClose, children, wide }) {
         <ScallopBorder id={`modal-scallop-${title}`} />
         <div className="flex items-start justify-between px-5 pt-6 pb-3 shrink-0">
           <div>
-            <h2 className="text-[16.5px] font-bold" style={{ fontFamily: FONT_HEAD, color: C.plum }}>
+            <h2
+              className="text-[16.5px] font-bold"
+              style={{ fontFamily: FONT_HEAD, color: C.plum }}
+            >
               {title}
             </h2>
             {subtitle && (
@@ -364,10 +389,21 @@ function Modal({ title, subtitle, onClose, children, wide }) {
   );
 }
 
-function Field({ label, icon: Icon, placeholder, type = "text", full, value, onChange }) {
+function Field({
+  label,
+  icon: Icon,
+  placeholder,
+  type = "text",
+  full,
+  value,
+  onChange,
+}) {
   return (
     <div className={full ? "sm:col-span-2" : ""}>
-      <label className="text-[11.5px] font-semibold mb-1 block" style={{ color: C.muted }}>
+      <label
+        className="text-[11.5px] font-semibold mb-1 block"
+        style={{ color: C.muted }}
+      >
         {label}
       </label>
       <div
@@ -388,7 +424,6 @@ function Field({ label, icon: Icon, placeholder, type = "text", full, value, onC
   );
 }
 
-/* ---------- New Customer Modal (now creates a real customer via the API) ---------- */
 function NewCustomerModal({ onClose, onCreated }) {
   const [form, setForm] = React.useState({
     name: "",
@@ -429,17 +464,58 @@ function NewCustomerModal({ onClose, onCreated }) {
   };
 
   return (
-    <Modal title="New Customer" subtitle="নতুন কাস্টমারের তথ্য যোগ করুন" onClose={onClose} wide>
+    <Modal
+      title="New Customer"
+      subtitle="নতুন কাস্টমারের তথ্য যোগ করুন"
+      onClose={onClose}
+      wide
+    >
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-        <Field label="Customer Name *" icon={CircleUserRound} placeholder="যেমন: Rafiq Hasan" value={form.name} onChange={set("name")} />
-        <Field label="Phone Number *" icon={Phone} placeholder="01XXX-XXXXXX" value={form.phone} onChange={set("phone")} />
-        <Field label="Email" icon={Mail} placeholder="optional" type="email" value={form.email} onChange={set("email")} />
-        <Field label="Opening Due (৳)" icon={Coins} placeholder="0" type="number" value={form.opening_due} onChange={set("opening_due")} />
-        <Field label="Address" icon={MapPin} placeholder="বাসা, রোড, এলাকা" full value={form.address} onChange={set("address")} />
+        <Field
+          label="Customer Name *"
+          icon={CircleUserRound}
+          placeholder="যেমন: Rafiq Hasan"
+          value={form.name}
+          onChange={set("name")}
+        />
+        <Field
+          label="Phone Number *"
+          icon={Phone}
+          placeholder="01XXX-XXXXXX"
+          value={form.phone}
+          onChange={set("phone")}
+        />
+        <Field
+          label="Email"
+          icon={Mail}
+          placeholder="optional"
+          type="email"
+          value={form.email}
+          onChange={set("email")}
+        />
+        <Field
+          label="Opening Due (৳)"
+          icon={Coins}
+          placeholder="0"
+          type="number"
+          value={form.opening_due}
+          onChange={set("opening_due")}
+        />
+        <Field
+          label="Address"
+          icon={MapPin}
+          placeholder="বাসা, রোড, এলাকা"
+          full
+          value={form.address}
+          onChange={set("address")}
+        />
       </div>
 
       {error && (
-        <div className="text-[12px] font-semibold mt-3" style={{ color: C.vermillion }}>
+        <div
+          className="text-[12px] font-semibold mt-3"
+          style={{ color: C.vermillion }}
+        >
           {error}
         </div>
       )}
@@ -459,14 +535,19 @@ function NewCustomerModal({ onClose, onCreated }) {
           className="flex-1 flex items-center justify-center gap-1.5 text-[13px] font-bold py-2.5 rounded-lg text-white disabled:opacity-60"
           style={{ backgroundColor: C.magenta }}
         >
-          {saving ? <Loader2 size={14} className="animate-spin" /> : <>Save Customer <ArrowRight size={14} /></>}
+          {saving ? (
+            <Loader2 size={14} className="animate-spin" />
+          ) : (
+            <>
+              Save Customer <ArrowRight size={14} />
+            </>
+          )}
         </button>
       </div>
     </Modal>
   );
 }
 
-/* ---------- Customer List Modal (now searches customers via the API) ---------- */
 function CustomerListModal({ onClose, onSelect }) {
   const [q, setQ] = React.useState("");
   const debouncedQ = useDebouncedValue(q, 350);
@@ -493,7 +574,11 @@ function CustomerListModal({ onClose, onSelect }) {
   }, [debouncedQ]);
 
   return (
-    <Modal title="Select Customer" subtitle="নাম বা ফোন নম্বর দিয়ে খুঁজুন" onClose={onClose}>
+    <Modal
+      title="Select Customer"
+      subtitle="নাম বা ফোন নম্বর দিয়ে খুঁজুন"
+      onClose={onClose}
+    >
       <div
         className="flex items-center gap-2 rounded-lg border px-3 py-2.5 mb-3 sticky top-0"
         style={{ borderColor: C.line, backgroundColor: C.paper }}
@@ -507,12 +592,21 @@ function CustomerListModal({ onClose, onSelect }) {
           className="flex-1 text-[13px] outline-none bg-transparent"
           style={{ color: C.ink }}
         />
-        {loading && <Loader2 size={14} className="animate-spin" style={{ color: C.muted }} />}
+        {loading && (
+          <Loader2
+            size={14}
+            className="animate-spin"
+            style={{ color: C.muted }}
+          />
+        )}
       </div>
 
       <div className="space-y-2">
         {!loading && customers.length === 0 && (
-          <div className="text-center text-[12.5px] py-8" style={{ color: C.muted }}>
+          <div
+            className="text-center text-[12.5px] py-8"
+            style={{ color: C.muted }}
+          >
             কোনো কাস্টমার পাওয়া যায়নি
           </div>
         )}
@@ -527,11 +621,18 @@ function CustomerListModal({ onClose, onSelect }) {
               className="w-10 h-10 rounded-lg flex items-center justify-center text-[13px] font-bold shrink-0"
               style={{ backgroundColor: C.purpleTint, color: C.purple }}
             >
-              {c.name.split(" ").map((w) => w[0]).join("").slice(0, 2)}
+              {c.name
+                .split(" ")
+                .map((w) => w[0])
+                .join("")
+                .slice(0, 2)}
             </div>
             <div className="flex-1 min-w-0">
               <div className="text-[13px] font-semibold truncate">{c.name}</div>
-              <div className="text-[11.5px] flex items-center gap-1" style={{ color: C.muted }}>
+              <div
+                className="text-[11.5px] flex items-center gap-1"
+                style={{ color: C.muted }}
+              >
                 <Phone size={10} /> {c.phone} · {c.area}
               </div>
             </div>
@@ -552,24 +653,34 @@ function CustomerListModal({ onClose, onSelect }) {
   );
 }
 
-/* ---------- Discount Modal ---------- */
 function DiscountModal({ onClose, onApply, subtotal, current }) {
-  const [type, setType] = React.useState(current?.type || "flat"); // "flat" | "percent"
-  const [amount, setAmount] = React.useState(current?.amount ? String(current.amount) : "");
+  const [type, setType] = React.useState(current?.type || "flat");
+  const [amount, setAmount] = React.useState(
+    current?.amount ? String(current.amount) : "",
+  );
 
   const num = parseFloat(amount) || 0;
-  const computed = type === "percent" ? Math.round((subtotal * num) / 100) : Math.round(num);
+  const computed =
+    type === "percent" ? Math.round((subtotal * num) / 100) : Math.round(num);
   const capped = Math.min(computed, subtotal);
 
   return (
-    <Modal title="Add Discount" subtitle="ডিসকাউন্ট টাইপ ও পরিমাণ দিন" onClose={onClose}>
+    <Modal
+      title="Add Discount"
+      subtitle="ডিসকাউন্ট টাইপ ও পরিমাণ দিন"
+      onClose={onClose}
+    >
       <div className="flex gap-2 mb-4">
         <button
           onClick={() => setType("flat")}
           className="flex-1 flex items-center justify-center gap-1.5 text-[12.5px] font-bold py-2.5 rounded-lg border"
           style={
             type === "flat"
-              ? { backgroundColor: C.magenta, borderColor: C.magenta, color: "#fff" }
+              ? {
+                  backgroundColor: C.magenta,
+                  borderColor: C.magenta,
+                  color: "#fff",
+                }
               : { borderColor: C.line, color: C.muted }
           }
         >
@@ -580,7 +691,11 @@ function DiscountModal({ onClose, onApply, subtotal, current }) {
           className="flex-1 flex items-center justify-center gap-1.5 text-[12.5px] font-bold py-2.5 rounded-lg border"
           style={
             type === "percent"
-              ? { backgroundColor: C.magenta, borderColor: C.magenta, color: "#fff" }
+              ? {
+                  backgroundColor: C.magenta,
+                  borderColor: C.magenta,
+                  color: "#fff",
+                }
               : { borderColor: C.line, color: C.muted }
           }
         >
@@ -604,7 +719,10 @@ function DiscountModal({ onClose, onApply, subtotal, current }) {
         <span className="text-[12.5px] font-semibold" style={{ color: C.rust }}>
           Discount Value
         </span>
-        <span className="text-[14px] font-bold" style={{ color: C.rust, fontFamily: FONT_MONO }}>
+        <span
+          className="text-[14px] font-bold"
+          style={{ color: C.rust, fontFamily: FONT_MONO }}
+        >
           ৳{capped.toLocaleString()}
         </span>
       </div>
@@ -632,15 +750,20 @@ function DiscountModal({ onClose, onApply, subtotal, current }) {
   );
 }
 
-/* ---------- Others Modal (extra charges) ---------- */
 function OthersModal({ onClose, onApply, current }) {
   const [label, setLabel] = React.useState(current?.label || "");
-  const [amount, setAmount] = React.useState(current?.amount ? String(current.amount) : "");
+  const [amount, setAmount] = React.useState(
+    current?.amount ? String(current.amount) : "",
+  );
 
   const num = parseFloat(amount) || 0;
 
   return (
-    <Modal title="Add Others" subtitle="অতিরিক্ত চার্জ (ডেলিভারি, প্যাকিং ইত্যাদি)" onClose={onClose}>
+    <Modal
+      title="Add Others"
+      subtitle="অতিরিক্ত চার্জ (ডেলিভারি, প্যাকিং ইত্যাদি)"
+      onClose={onClose}
+    >
       <div className="flex flex-col gap-3.5">
         <Field
           label="Charge Label"
@@ -682,8 +805,20 @@ function OthersModal({ onClose, onApply, current }) {
   );
 }
 
-/* ---------- Printable Memo (receipt) ---------- */
-function PrintMemo({ invoiceNo, time, customer, items, subtotal, discount, discountValue, others, othersValue, returnValue, preDue, payable }) {
+function PrintMemo({
+  invoiceNo,
+  time,
+  customer,
+  items,
+  subtotal,
+  discount,
+  discountValue,
+  others,
+  othersValue,
+  returnValue,
+  preDue,
+  payable,
+}) {
   const accent = "#C23B6D";
   const dark = "#3A1930";
 
@@ -700,7 +835,14 @@ function PrintMemo({ invoiceNo, time, customer, items, subtotal, discount, disco
       }}
     >
       <div style={{ textAlign: "center", paddingBottom: 10 }}>
-        <div style={{ fontSize: 21, fontWeight: 800, color: dark, letterSpacing: "0.3px" }}>
+        <div
+          style={{
+            fontSize: 21,
+            fontWeight: 800,
+            color: dark,
+            letterSpacing: "0.3px",
+          }}
+        >
           Spire Technology Ltd
         </div>
         <div style={{ fontSize: 11.5, color: "#5B4E4A", marginTop: 3 }}>
@@ -708,17 +850,58 @@ function PrintMemo({ invoiceNo, time, customer, items, subtotal, discount, disco
         </div>
       </div>
 
-      <div style={{ height: 3, background: `linear-gradient(90deg, ${accent}, #E0A030, #1E7F86)`, borderRadius: 3 }} />
+      <div
+        style={{
+          height: 3,
+          background: `linear-gradient(90deg, ${accent}, #E0A030, #1E7F86)`,
+          borderRadius: 3,
+        }}
+      />
 
-      <div style={{ textAlign: "center", padding: "8px 0", borderBottom: "1px dashed #C9B79A" }}>
-        <div style={{ fontSize: 13, fontWeight: 700, color: dark, letterSpacing: "1.5px", textTransform: "uppercase" }}>
+      <div
+        style={{
+          textAlign: "center",
+          padding: "8px 0",
+          borderBottom: "1px dashed #C9B79A",
+        }}
+      >
+        <div
+          style={{
+            fontSize: 13,
+            fontWeight: 700,
+            color: dark,
+            letterSpacing: "1.5px",
+            textTransform: "uppercase",
+          }}
+        >
           Sales Memo
         </div>
       </div>
 
-      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, padding: "8px 0", color: "#5B4E4A" }}>
-        <span>Memo No: <b style={{ color: "#2B2320" }}>{invoiceNo}</b></span>
-        <span>{time.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })} &nbsp;{time.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}</span>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          fontSize: 11,
+          padding: "8px 0",
+          color: "#5B4E4A",
+        }}
+      >
+        <span>
+          Memo No: <b style={{ color: "#2B2320" }}>{invoiceNo}</b>
+        </span>
+        <span>
+          {time.toLocaleDateString("en-GB", {
+            day: "2-digit",
+            month: "short",
+            year: "numeric",
+          })}{" "}
+          &nbsp;
+          {time.toLocaleTimeString("en-US", {
+            hour: "2-digit",
+            minute: "2-digit",
+          })}
+        </span>
       </div>
 
       <div
@@ -730,7 +913,16 @@ function PrintMemo({ invoiceNo, time, customer, items, subtotal, discount, disco
           backgroundColor: "#FCF6EA",
         }}
       >
-        <div style={{ fontSize: 10, fontWeight: 700, color: accent, letterSpacing: "1px", textTransform: "uppercase", marginBottom: 4 }}>
+        <div
+          style={{
+            fontSize: 10,
+            fontWeight: 700,
+            color: accent,
+            letterSpacing: "1px",
+            textTransform: "uppercase",
+            marginBottom: 4,
+          }}
+        >
           Bill To
         </div>
         <div style={{ fontSize: 13.5, fontWeight: 700, color: dark }}>
@@ -744,52 +936,126 @@ function PrintMemo({ invoiceNo, time, customer, items, subtotal, discount, disco
         </div>
       </div>
 
-      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5 }}>
+      <table
+        style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5 }}
+      >
         <thead>
-          <tr style={{ borderTop: `1.5px solid ${dark}`, borderBottom: `1.5px solid ${dark}` }}>
-            <th style={{ textAlign: "left", padding: "5px 2px", color: dark }}>Item</th>
-            <th style={{ textAlign: "center", padding: "5px 2px", color: dark }}>Qty</th>
-            <th style={{ textAlign: "right", padding: "5px 2px", color: dark }}>Rate</th>
-            <th style={{ textAlign: "right", padding: "5px 2px", color: dark }}>Amount</th>
+          <tr
+            style={{
+              borderTop: `1.5px solid ${dark}`,
+              borderBottom: `1.5px solid ${dark}`,
+            }}
+          >
+            <th style={{ textAlign: "left", padding: "5px 2px", color: dark }}>
+              Item
+            </th>
+            <th
+              style={{ textAlign: "center", padding: "5px 2px", color: dark }}
+            >
+              Qty
+            </th>
+            <th style={{ textAlign: "right", padding: "5px 2px", color: dark }}>
+              Rate
+            </th>
+            <th style={{ textAlign: "right", padding: "5px 2px", color: dark }}>
+              Amount
+            </th>
           </tr>
         </thead>
         <tbody>
           {items.map((it, i) => (
-            <tr key={it.id ?? it.name} style={{ borderBottom: i === items.length - 1 ? "none" : "1px dotted #E8D9BE" }}>
+            <tr
+              key={it.id ?? it.name}
+              style={{
+                borderBottom:
+                  i === items.length - 1 ? "none" : "1px dotted #E8D9BE",
+              }}
+            >
               <td style={{ padding: "5px 2px" }}>{it.name}</td>
-              <td style={{ textAlign: "center", padding: "5px 2px" }}>{it.qty}</td>
-              <td style={{ textAlign: "right", padding: "5px 2px" }}>{it.unit}</td>
-              <td style={{ textAlign: "right", padding: "5px 2px", fontWeight: 600 }}>{(it.unit * it.qty).toLocaleString()}</td>
+              <td style={{ textAlign: "center", padding: "5px 2px" }}>
+                {it.qty}
+              </td>
+              <td style={{ textAlign: "right", padding: "5px 2px" }}>
+                {it.unit}
+              </td>
+              <td
+                style={{
+                  textAlign: "right",
+                  padding: "5px 2px",
+                  fontWeight: 600,
+                }}
+              >
+                {(it.unit * it.qty).toLocaleString()}
+              </td>
             </tr>
           ))}
         </tbody>
       </table>
 
-      <div style={{ marginTop: 10, paddingTop: 8, borderTop: `1.5px solid ${dark}` }}>
-        <div style={{ display: "flex", justifyContent: "space-between", padding: "2px 0" }}>
+      <div
+        style={{
+          marginTop: 10,
+          paddingTop: 8,
+          borderTop: `1.5px solid ${dark}`,
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            padding: "2px 0",
+          }}
+        >
           <span>Total Gross</span>
           <span>৳{subtotal.toLocaleString()}</span>
         </div>
         {discount && discountValue > 0 && (
-          <div style={{ display: "flex", justifyContent: "space-between", padding: "2px 0" }}>
-            <span>Discount {discount.type === "percent" ? `(${discount.amount}%)` : ""}</span>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              padding: "2px 0",
+            }}
+          >
+            <span>
+              Discount{" "}
+              {discount.type === "percent" ? `(${discount.amount}%)` : ""}
+            </span>
             <span>- ৳{discountValue.toLocaleString()}</span>
           </div>
         )}
         {others && othersValue > 0 && (
-          <div style={{ display: "flex", justifyContent: "space-between", padding: "2px 0" }}>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              padding: "2px 0",
+            }}
+          >
             <span>{others.label}</span>
             <span>৳{othersValue.toLocaleString()}</span>
           </div>
         )}
         {returnValue > 0 && (
-          <div style={{ display: "flex", justifyContent: "space-between", padding: "2px 0" }}>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              padding: "2px 0",
+            }}
+          >
             <span>Product Return</span>
             <span>- ৳{returnValue.toLocaleString()}</span>
           </div>
         )}
         {preDue > 0 && (
-          <div style={{ display: "flex", justifyContent: "space-between", padding: "2px 0" }}>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              padding: "2px 0",
+            }}
+          >
             <span>Pre Due</span>
             <span>৳{preDue.toLocaleString()}</span>
           </div>
@@ -812,21 +1078,44 @@ function PrintMemo({ invoiceNo, time, customer, items, subtotal, discount, disco
         </div>
       </div>
 
-      <div style={{ textAlign: "center", marginTop: 16, paddingTop: 10, borderTop: "1px dashed #C9B79A" }}>
-        <div style={{ fontSize: 12, fontWeight: 700, color: dark }}>ধন্যবাদ, আবার আসবেন!</div>
-        <div style={{ fontSize: 10.5, color: "#8C7B6B", marginTop: 2 }}>Thank you for shopping with Spire Technology Ltd</div>
+      <div
+        style={{
+          textAlign: "center",
+          marginTop: 16,
+          paddingTop: 10,
+          borderTop: "1px dashed #C9B79A",
+        }}
+      >
+        <div style={{ fontSize: 12, fontWeight: 700, color: dark }}>
+          ধন্যবাদ, আবার আসবেন!
+        </div>
+        <div style={{ fontSize: 10.5, color: "#8C7B6B", marginTop: 2 }}>
+          Thank you for shopping with Spire Technology Ltd
+        </div>
       </div>
     </div>
   );
 }
 
-const bankMethods = ["bKash", "Nagad", "Rocket", "Upay", "Bank Transfer", "Debit/Credit Card"];
+const bankMethods = [
+  "bKash",
+  "Nagad",
+  "Rocket",
+  "Upay",
+  "Bank Transfer",
+  "Debit/Credit Card",
+];
 
-/* ---------- Multiple Pay Modal ---------- */
 function MultiplePayModal({ onClose, onApply, payable, current, onConfirmed }) {
-  const [cash, setCash] = React.useState(current?.cash ? String(current.cash) : "");
-  const [bank, setBank] = React.useState(current?.bank ? String(current.bank) : "");
-  const [bankMethod, setBankMethod] = React.useState(current?.bankMethod || bankMethods[0]);
+  const [cash, setCash] = React.useState(
+    current?.cash ? String(current.cash) : "",
+  );
+  const [bank, setBank] = React.useState(
+    current?.bank ? String(current.bank) : "",
+  );
+  const [bankMethod, setBankMethod] = React.useState(
+    current?.bankMethod || bankMethods[0],
+  );
 
   const cashNum = parseFloat(cash) || 0;
   const bankNum = parseFloat(bank) || 0;
@@ -834,22 +1123,35 @@ function MultiplePayModal({ onClose, onApply, payable, current, onConfirmed }) {
   const remaining = payable - totalPaid;
 
   return (
-    <Modal title="Multiple Pay" subtitle="ক্যাশ ও ব্যাংক/MFS মিলিয়ে পেমেন্ট করুন" onClose={onClose}>
+    <Modal
+      title="Multiple Pay"
+      subtitle="ক্যাশ ও ব্যাংক/MFS মিলিয়ে পেমেন্ট করুন"
+      onClose={onClose}
+    >
       <div
         className="flex items-center justify-between rounded-lg px-3 py-2.5 mb-3.5"
         style={{ backgroundColor: C.peacockTint }}
       >
-        <span className="text-[12.5px] font-semibold" style={{ color: C.peacock }}>
+        <span
+          className="text-[12.5px] font-semibold"
+          style={{ color: C.peacock }}
+        >
           Total Payable
         </span>
-        <span className="text-[15px] font-bold" style={{ color: C.peacock, fontFamily: FONT_MONO }}>
+        <span
+          className="text-[15px] font-bold"
+          style={{ color: C.peacock, fontFamily: FONT_MONO }}
+        >
           ৳{payable.toLocaleString()}
         </span>
       </div>
 
       <div className="flex flex-col gap-3.5">
         <div>
-          <label className="text-[11.5px] font-semibold mb-1 flex items-center gap-1.5" style={{ color: C.muted }}>
+          <label
+            className="text-[11.5px] font-semibold mb-1 flex items-center gap-1.5"
+            style={{ color: C.muted }}
+          >
             <Wallet size={13} style={{ color: C.magenta }} /> Cash Amount (৳)
           </label>
           <div
@@ -868,8 +1170,12 @@ function MultiplePayModal({ onClose, onApply, payable, current, onConfirmed }) {
         </div>
 
         <div>
-          <label className="text-[11.5px] font-semibold mb-1 flex items-center gap-1.5" style={{ color: C.muted }}>
-            <CreditCard size={13} style={{ color: C.plum }} /> Bank / MFS Amount (৳)
+          <label
+            className="text-[11.5px] font-semibold mb-1 flex items-center gap-1.5"
+            style={{ color: C.muted }}
+          >
+            <CreditCard size={13} style={{ color: C.plum }} /> Bank / MFS Amount
+            (৳)
           </label>
           <div className="flex gap-2">
             <div
@@ -889,7 +1195,12 @@ function MultiplePayModal({ onClose, onApply, payable, current, onConfirmed }) {
               value={bankMethod}
               onChange={(e) => setBankMethod(e.target.value)}
               className="text-[12.5px] font-semibold rounded-lg border px-2.5 py-2"
-              style={{ borderColor: C.line, backgroundColor: C.paper, color: C.ink, maxWidth: 132 }}
+              style={{
+                borderColor: C.line,
+                backgroundColor: C.paper,
+                color: C.ink,
+                maxWidth: 132,
+              }}
             >
               {bankMethods.map((m) => (
                 <option key={m} value={m}>
@@ -906,7 +1217,9 @@ function MultiplePayModal({ onClose, onApply, payable, current, onConfirmed }) {
       <div className="space-y-1.5">
         <div className="flex items-center justify-between text-[12.5px] font-semibold">
           <span style={{ color: C.muted }}>Total Paid</span>
-          <span style={{ fontFamily: FONT_MONO }}>৳{totalPaid.toLocaleString()}</span>
+          <span style={{ fontFamily: FONT_MONO }}>
+            ৳{totalPaid.toLocaleString()}
+          </span>
         </div>
         <div
           className="flex items-center justify-between text-[13px] font-bold px-3 py-2 rounded-lg"
@@ -914,12 +1227,20 @@ function MultiplePayModal({ onClose, onApply, payable, current, onConfirmed }) {
             remaining > 0
               ? { backgroundColor: C.vermillionTint, color: C.vermillion }
               : remaining < 0
-              ? { backgroundColor: C.marigoldTint, color: C.rust }
-              : { backgroundColor: C.forestTint, color: C.forestDark }
+                ? { backgroundColor: C.marigoldTint, color: C.rust }
+                : { backgroundColor: C.forestTint, color: C.forestDark }
           }
         >
-          <span>{remaining > 0 ? "Due Remaining" : remaining < 0 ? "Change / Extra" : "Fully Paid"}</span>
-          <span style={{ fontFamily: FONT_MONO }}>৳{Math.abs(remaining).toLocaleString()}</span>
+          <span>
+            {remaining > 0
+              ? "Due Remaining"
+              : remaining < 0
+                ? "Change / Extra"
+                : "Fully Paid"}
+          </span>
+          <span style={{ fontFamily: FONT_MONO }}>
+            ৳{Math.abs(remaining).toLocaleString()}
+          </span>
         </div>
       </div>
 
@@ -947,9 +1268,10 @@ function MultiplePayModal({ onClose, onApply, payable, current, onConfirmed }) {
   );
 }
 
-/* ---------- Cash Pay Modal ---------- */
 function CashPayModal({ onClose, onApply, payable, current, onConfirmed }) {
-  const [received, setReceived] = React.useState(current?.received ? String(current.received) : "");
+  const [received, setReceived] = React.useState(
+    current?.received ? String(current.received) : "",
+  );
 
   const num = parseFloat(received) || 0;
   const change = num - payable;
@@ -957,20 +1279,33 @@ function CashPayModal({ onClose, onApply, payable, current, onConfirmed }) {
   const quickAmounts = [payable, 500, 1000, 2000];
 
   return (
-    <Modal title="Cash Payment" subtitle="গ্রাহকের কাছ থেকে ক্যাশ গ্রহণ করুন" onClose={onClose}>
+    <Modal
+      title="Cash Payment"
+      subtitle="গ্রাহকের কাছ থেকে ক্যাশ গ্রহণ করুন"
+      onClose={onClose}
+    >
       <div
         className="flex items-center justify-between rounded-lg px-3 py-2.5 mb-3.5"
         style={{ backgroundColor: C.magentaTint }}
       >
-        <span className="text-[12.5px] font-semibold" style={{ color: C.magenta }}>
+        <span
+          className="text-[12.5px] font-semibold"
+          style={{ color: C.magenta }}
+        >
           Total Payable
         </span>
-        <span className="text-[15px] font-bold" style={{ color: C.magenta, fontFamily: FONT_MONO }}>
+        <span
+          className="text-[15px] font-bold"
+          style={{ color: C.magenta, fontFamily: FONT_MONO }}
+        >
           ৳{payable.toLocaleString()}
         </span>
       </div>
 
-      <label className="text-[11.5px] font-semibold mb-1 flex items-center gap-1.5" style={{ color: C.muted }}>
+      <label
+        className="text-[11.5px] font-semibold mb-1 flex items-center gap-1.5"
+        style={{ color: C.muted }}
+      >
         <Wallet size={13} style={{ color: C.magenta }} /> Received Amount (৳)
       </label>
       <div
@@ -1007,12 +1342,20 @@ function CashPayModal({ onClose, onApply, payable, current, onConfirmed }) {
           change > 0
             ? { backgroundColor: C.forestTint, color: C.forestDark }
             : change < 0
-            ? { backgroundColor: C.vermillionTint, color: C.vermillion }
-            : { backgroundColor: C.line, color: C.ink }
+              ? { backgroundColor: C.vermillionTint, color: C.vermillion }
+              : { backgroundColor: C.line, color: C.ink }
         }
       >
-        <span>{change > 0 ? "Change to Return" : change < 0 ? "Amount Short" : "Exact Amount"}</span>
-        <span style={{ fontFamily: FONT_MONO }}>৳{Math.abs(change).toLocaleString()}</span>
+        <span>
+          {change > 0
+            ? "Change to Return"
+            : change < 0
+              ? "Amount Short"
+              : "Exact Amount"}
+        </span>
+        <span style={{ fontFamily: FONT_MONO }}>
+          ৳{Math.abs(change).toLocaleString()}
+        </span>
       </div>
 
       <div className="flex gap-2.5 mt-5">
@@ -1039,24 +1382,33 @@ function CashPayModal({ onClose, onApply, payable, current, onConfirmed }) {
   );
 }
 
-/* ---------- Card / MFS Pay Modal ---------- */
 function CardPayModal({ onClose, onApply, payable, current, onConfirmed }) {
   const [method, setMethod] = React.useState(current?.method || bankMethods[0]);
   const [refNo, setRefNo] = React.useState(current?.refNo || "");
 
   return (
-    <Modal title="MFS / Card Payment" subtitle="পেমেন্ট মাধ্যম বেছে নিন" onClose={onClose}>
+    <Modal
+      title="MFS / Card Payment"
+      subtitle="পেমেন্ট মাধ্যম বেছে নিন"
+      onClose={onClose}
+    >
       <div
         className="flex items-center justify-between rounded-lg px-3 py-2.5 mb-3.5"
         style={{ backgroundColor: C.plumLight, color: "#fff" }}
       >
         <span className="text-[12.5px] font-semibold">Total Payable</span>
-        <span className="text-[15px] font-bold" style={{ fontFamily: FONT_MONO }}>
+        <span
+          className="text-[15px] font-bold"
+          style={{ fontFamily: FONT_MONO }}
+        >
           ৳{payable.toLocaleString()}
         </span>
       </div>
 
-      <label className="text-[11.5px] font-semibold mb-1 block" style={{ color: C.muted }}>
+      <label
+        className="text-[11.5px] font-semibold mb-1 block"
+        style={{ color: C.muted }}
+      >
         Payment Method
       </label>
       <div className="grid grid-cols-3 gap-2 mb-3.5">
@@ -1067,7 +1419,11 @@ function CardPayModal({ onClose, onApply, payable, current, onConfirmed }) {
             className="text-[11.5px] font-bold py-2.5 rounded-lg border text-center"
             style={
               method === m
-                ? { backgroundColor: C.plum, borderColor: C.plum, color: "#fff" }
+                ? {
+                    backgroundColor: C.plum,
+                    borderColor: C.plum,
+                    color: "#fff",
+                  }
                 : { borderColor: C.line, color: C.muted }
             }
           >
@@ -1108,10 +1464,31 @@ function CardPayModal({ onClose, onApply, payable, current, onConfirmed }) {
   );
 }
 
-/* ---------- Sale Confirmation Modal ---------- */
-function SaleConfirmationModal({ onClose, onPrint, customer, items, subtotal, discount, discountValue, others, othersValue, returnItems, returnValue, preDue, payable, cashPay, cardPay, multiPay }) {
+function SaleConfirmationModal({
+  onClose,
+  onPrint,
+  customer,
+  items,
+  subtotal,
+  discount,
+  discountValue,
+  others,
+  othersValue,
+  returnItems,
+  returnValue,
+  preDue,
+  payable,
+  cashPay,
+  cardPay,
+  multiPay,
+}) {
   return (
-    <Modal title="Sale Confirmed" subtitle="বিক্রয়ের সম্পূর্ণ বিবরণ" onClose={onClose} wide>
+    <Modal
+      title="Sale Confirmed"
+      subtitle="বিক্রয়ের সম্পূর্ণ বিবরণ"
+      onClose={onClose}
+      wide
+    >
       <div
         className="flex items-center gap-2 rounded-lg px-3 py-2.5 mb-4"
         style={{ backgroundColor: C.forestTint, color: C.forestDark }}
@@ -1122,14 +1499,24 @@ function SaleConfirmationModal({ onClose, onPrint, customer, items, subtotal, di
         >
           ✓
         </span>
-        <span className="text-[13px] font-bold">Sale completed successfully</span>
+        <span className="text-[13px] font-bold">
+          Sale completed successfully
+        </span>
       </div>
 
-      <div className="rounded-lg border px-3 py-2.5 mb-3" style={{ borderColor: C.line, backgroundColor: C.paper }}>
-        <div className="text-[10px] font-bold uppercase tracking-wide mb-1" style={{ color: C.muted }}>
+      <div
+        className="rounded-lg border px-3 py-2.5 mb-3"
+        style={{ borderColor: C.line, backgroundColor: C.paper }}
+      >
+        <div
+          className="text-[10px] font-bold uppercase tracking-wide mb-1"
+          style={{ color: C.muted }}
+        >
           Customer
         </div>
-        <div className="text-[13px] font-bold">{customer ? customer.name : "Walking Customer"}</div>
+        <div className="text-[13px] font-bold">
+          {customer ? customer.name : "Walking Customer"}
+        </div>
         {customer && (
           <div className="text-[11.5px]" style={{ color: C.muted }}>
             {customer.phone} · {customer.area}
@@ -1137,7 +1524,10 @@ function SaleConfirmationModal({ onClose, onPrint, customer, items, subtotal, di
         )}
       </div>
 
-      <div className="rounded-lg border overflow-hidden mb-3" style={{ borderColor: C.line }}>
+      <div
+        className="rounded-lg border overflow-hidden mb-3"
+        style={{ borderColor: C.line }}
+      >
         <div
           className="grid grid-cols-[1fr_50px_70px] text-[10.5px] font-bold text-white px-3 py-2"
           style={{ backgroundColor: C.plum }}
@@ -1150,11 +1540,18 @@ function SaleConfirmationModal({ onClose, onPrint, customer, items, subtotal, di
           <div
             key={it.id ?? it.name}
             className="grid grid-cols-[1fr_50px_70px] px-3 py-2 text-[12px]"
-            style={i !== items.length - 1 ? { borderBottom: `1px solid ${C.line}` } : undefined}
+            style={
+              i !== items.length - 1
+                ? { borderBottom: `1px solid ${C.line}` }
+                : undefined
+            }
           >
             <div className="font-semibold">{it.name}</div>
             <div className="text-center">{it.qty}</div>
-            <div className="text-right font-bold" style={{ fontFamily: FONT_MONO }}>
+            <div
+              className="text-right font-bold"
+              style={{ fontFamily: FONT_MONO }}
+            >
               ৳{(it.unit * it.qty).toLocaleString()}
             </div>
           </div>
@@ -1162,7 +1559,10 @@ function SaleConfirmationModal({ onClose, onPrint, customer, items, subtotal, di
       </div>
 
       {returnItems && returnItems.length > 0 && (
-        <div className="rounded-lg border overflow-hidden mb-3" style={{ borderColor: C.vermillion }}>
+        <div
+          className="rounded-lg border overflow-hidden mb-3"
+          style={{ borderColor: C.vermillion }}
+        >
           <div
             className="flex items-center gap-1.5 text-[10.5px] font-bold text-white px-3 py-2"
             style={{ backgroundColor: C.vermillion }}
@@ -1173,11 +1573,22 @@ function SaleConfirmationModal({ onClose, onPrint, customer, items, subtotal, di
             <div
               key={it.id ?? it.name}
               className="grid grid-cols-[1fr_50px_70px] px-3 py-2 text-[12px]"
-              style={{ backgroundColor: C.vermillionTint, borderBottom: i !== returnItems.length - 1 ? "1px solid #fff" : undefined }}
+              style={{
+                backgroundColor: C.vermillionTint,
+                borderBottom:
+                  i !== returnItems.length - 1 ? "1px solid #fff" : undefined,
+              }}
             >
-              <div className="font-semibold" style={{ color: C.vermillion }}>{it.name}</div>
-              <div className="text-center" style={{ color: C.vermillion }}>{it.qty}</div>
-              <div className="text-right font-bold" style={{ color: C.vermillion, fontFamily: FONT_MONO }}>
+              <div className="font-semibold" style={{ color: C.vermillion }}>
+                {it.name}
+              </div>
+              <div className="text-center" style={{ color: C.vermillion }}>
+                {it.qty}
+              </div>
+              <div
+                className="text-right font-bold"
+                style={{ color: C.vermillion, fontFamily: FONT_MONO }}
+              >
                 - ৳{(it.unit * it.qty).toLocaleString()}
               </div>
             </div>
@@ -1185,63 +1596,119 @@ function SaleConfirmationModal({ onClose, onPrint, customer, items, subtotal, di
         </div>
       )}
 
-      <div className="rounded-lg border px-3 py-2.5 mb-3" style={{ borderColor: C.line, backgroundColor: C.paper }}>
+      <div
+        className="rounded-lg border px-3 py-2.5 mb-3"
+        style={{ borderColor: C.line, backgroundColor: C.paper }}
+      >
         <Row label="Total Gross" value={`৳${subtotal.toLocaleString()}`} />
         {discount && discountValue > 0 && (
-          <Row label={`Discount ${discount.type === "percent" ? `(${discount.amount}%)` : ""}`} value={`- ৳${discountValue.toLocaleString()}`} />
+          <Row
+            label={`Discount ${discount.type === "percent" ? `(${discount.amount}%)` : ""}`}
+            value={`- ৳${discountValue.toLocaleString()}`}
+          />
         )}
-        {others && othersValue > 0 && <Row label={others.label} value={`৳${othersValue.toLocaleString()}`} />}
-        {returnValue > 0 && <Row label="Product Return" value={`- ৳${returnValue.toLocaleString()}`} />}
-        {preDue > 0 && <Row label="Pre Due" value={`৳${preDue.toLocaleString()}`} />}
+        {others && othersValue > 0 && (
+          <Row
+            label={others.label}
+            value={`৳${othersValue.toLocaleString()}`}
+          />
+        )}
+        {returnValue > 0 && (
+          <Row
+            label="Product Return"
+            value={`- ৳${returnValue.toLocaleString()}`}
+          />
+        )}
+        {preDue > 0 && (
+          <Row label="Pre Due" value={`৳${preDue.toLocaleString()}`} />
+        )}
         <div className="h-px my-1.5" style={{ backgroundColor: C.line }} />
-        <Row label="Total Payable" value={`৳${payable.toLocaleString()}`} bold />
+        <Row
+          label="Total Payable"
+          value={`৳${payable.toLocaleString()}`}
+          bold
+        />
       </div>
 
-      <div className="rounded-lg px-3 py-2.5 mb-1" style={{ backgroundColor: C.magentaTint }}>
-        <div className="text-[10px] font-bold uppercase tracking-wide mb-1.5" style={{ color: C.magenta }}>
+      <div
+        className="rounded-lg px-3 py-2.5 mb-1"
+        style={{ backgroundColor: C.magentaTint }}
+      >
+        <div
+          className="text-[10px] font-bold uppercase tracking-wide mb-1.5"
+          style={{ color: C.magenta }}
+        >
           Payment Details
         </div>
         {cashPay && (
-          <div className="flex items-center justify-between text-[12.5px] font-semibold" style={{ color: C.ink }}>
+          <div
+            className="flex items-center justify-between text-[12.5px] font-semibold"
+            style={{ color: C.ink }}
+          >
             <span className="flex items-center gap-1.5">
               <Wallet size={13} /> Cash Received
             </span>
-            <span style={{ fontFamily: FONT_MONO }}>৳{cashPay.received.toLocaleString()}</span>
+            <span style={{ fontFamily: FONT_MONO }}>
+              ৳{cashPay.received.toLocaleString()}
+            </span>
           </div>
         )}
         {cashPay && cashPay.change > 0 && (
-          <div className="flex items-center justify-between text-[11.5px] mt-1" style={{ color: C.muted }}>
+          <div
+            className="flex items-center justify-between text-[11.5px] mt-1"
+            style={{ color: C.muted }}
+          >
             <span>Change Returned</span>
-            <span style={{ fontFamily: FONT_MONO }}>৳{cashPay.change.toLocaleString()}</span>
+            <span style={{ fontFamily: FONT_MONO }}>
+              ৳{cashPay.change.toLocaleString()}
+            </span>
           </div>
         )}
         {cardPay && (
-          <div className="flex items-center justify-between text-[12.5px] font-semibold" style={{ color: C.ink }}>
+          <div
+            className="flex items-center justify-between text-[12.5px] font-semibold"
+            style={{ color: C.ink }}
+          >
             <span className="flex items-center gap-1.5">
               <CreditCard size={13} /> {cardPay.method}
             </span>
-            <span style={{ fontFamily: FONT_MONO }}>৳{cardPay.amount.toLocaleString()}</span>
+            <span style={{ fontFamily: FONT_MONO }}>
+              ৳{cardPay.amount.toLocaleString()}
+            </span>
           </div>
         )}
         {cardPay && cardPay.refNo && (
-          <div className="flex items-center justify-between text-[11.5px] mt-1" style={{ color: C.muted }}>
+          <div
+            className="flex items-center justify-between text-[11.5px] mt-1"
+            style={{ color: C.muted }}
+          >
             <span>Reference No</span>
             <span style={{ fontFamily: FONT_MONO }}>{cardPay.refNo}</span>
           </div>
         )}
         {multiPay && (multiPay.cash > 0 || multiPay.bank > 0) && (
           <>
-            <div className="flex items-center justify-between text-[12.5px] font-semibold" style={{ color: C.ink }}>
+            <div
+              className="flex items-center justify-between text-[12.5px] font-semibold"
+              style={{ color: C.ink }}
+            >
               <span className="flex items-center gap-1.5">
                 <Wallet size={13} /> Cash
               </span>
-              <span style={{ fontFamily: FONT_MONO }}>৳{multiPay.cash.toLocaleString()}</span>
+              <span style={{ fontFamily: FONT_MONO }}>
+                ৳{multiPay.cash.toLocaleString()}
+              </span>
             </div>
-            <div className="flex items-center justify-between text-[12.5px] font-semibold mt-1" style={{ color: C.ink }}>
+            <div
+              className="flex items-center justify-between text-[12.5px] font-semibold mt-1"
+              style={{ color: C.ink }}
+            >
               <span className="flex items-center gap-1.5">
                 <CreditCard size={13} /> {multiPay.bankMethod}
               </span>
-              <span style={{ fontFamily: FONT_MONO }}>৳{multiPay.bank.toLocaleString()}</span>
+              <span style={{ fontFamily: FONT_MONO }}>
+                ৳{multiPay.bank.toLocaleString()}
+              </span>
             </div>
           </>
         )}
@@ -1272,8 +1739,6 @@ function SaleConfirmationModal({ onClose, onPrint, customer, items, subtotal, di
   );
 }
 
-
-
 export default function SellPage() {
   useGoogleFonts();
   useScrollbarStyle();
@@ -1285,11 +1750,11 @@ export default function SellPage() {
   const [productsLoading, setProductsLoading] = React.useState(false);
   const [productsError, setProductsError] = React.useState(null);
 
-  const [categories, setCategories] = React.useState([]); // [{id, name}]
-  const [brands, setBrands] = React.useState([]); // [{id, name}]
+  const [categories, setCategories] = React.useState([]);
+  const [brands, setBrands] = React.useState([]);
 
-  const [activeCatId, setActiveCatId] = React.useState(""); // "" = all
-  const [activeBrandId, setActiveBrandId] = React.useState(""); // "" = all
+  const [activeCatId, setActiveCatId] = React.useState("");
+  const [activeBrandId, setActiveBrandId] = React.useState("");
   const [productSearch, setProductSearch] = React.useState("");
   const debouncedProductSearch = useDebouncedValue(productSearch, 350);
 
@@ -1297,7 +1762,7 @@ export default function SellPage() {
   const [barcodeLoading, setBarcodeLoading] = React.useState(false);
 
   // -- Cart / sale state --------------------------------------------------
-  const [cart, setCart] = React.useState([]); // [{id, name, unit, qty}]
+  const [cart, setCart] = React.useState([]);
   const [modal, setModal] = React.useState(null);
   const [selectedCustomer, setSelectedCustomer] = React.useState(null);
   const [discount, setDiscount] = React.useState(null);
@@ -1309,7 +1774,7 @@ export default function SellPage() {
 
   const [saleLoading, setSaleLoading] = React.useState(false);
   const [saleError, setSaleError] = React.useState(null);
-  const [confirmedSale, setConfirmedSale] = React.useState(null); // { invoiceNo, ...serverResponse }
+  const [confirmedSale, setConfirmedSale] = React.useState(null);
 
   // -- Load categories & brands once --------------------------------------
   React.useEffect(() => {
@@ -1357,24 +1822,30 @@ export default function SellPage() {
       const existing = prev.find((i) => i.id === product.id);
       if (existing) {
         return prev.map((i) =>
-          i.id === product.id ? { ...i, qty: i.qty + 1 } : i
+          i.id === product.id ? { ...i, qty: i.qty + 1 } : i,
         );
       }
-      return [...prev, { id: product.id, name: product.name, unit: product.price, qty: 1 }];
+      return [
+        ...prev,
+        { id: product.id, name: product.name, unit: product.price, qty: 1 },
+      ];
     });
   };
 
   const incrementQty = (id) =>
-    setCart((prev) => prev.map((i) => (i.id === id ? { ...i, qty: i.qty + 1 } : i)));
+    setCart((prev) =>
+      prev.map((i) => (i.id === id ? { ...i, qty: i.qty + 1 } : i)),
+    );
 
   const decrementQty = (id) =>
     setCart((prev) =>
       prev
         .map((i) => (i.id === id ? { ...i, qty: i.qty - 1 } : i))
-        .filter((i) => i.qty > 0)
+        .filter((i) => i.qty > 0),
     );
 
-  const removeFromCart = (id) => setCart((prev) => prev.filter((i) => i.id !== id));
+  const removeFromCart = (id) =>
+    setCart((prev) => prev.filter((i) => i.id !== id));
 
   const resetSale = () => {
     setCart([]);
@@ -1389,19 +1860,45 @@ export default function SellPage() {
     setSaleError(null);
   };
 
-  // -- Barcode scan: look up the product and add it straight to the cart --
+  /**
+   * Barcode Search & Direct Add-to-Cart Logic
+   */
   const handleBarcodeSubmit = async (e) => {
     if (e.key !== "Enter" || !barcodeInput.trim()) return;
+    const term = barcodeInput.trim();
     setBarcodeLoading(true);
+    setSaleError(null);
+
     try {
-      // NOTE: productService has no dedicated "lookup by barcode" endpoint,
-      // so this reuses the list endpoint's `search` param. If your backend
-      // exposes a barcode-specific filter, swap `search` for that key.
-      const res = await fetchProducts({ search: barcodeInput.trim(), per_page: 1 });
-      const found = extractList(res).map(normalizeProduct)[0];
+      // 1. Search locally in already loaded products
+      const localMatch = products.find(
+        (p) => p.barcode && p.barcode.toString().toLowerCase() === term.toLowerCase()
+      );
+
+      if (localMatch) {
+        addToCart(localMatch);
+        setBarcodeInput("");
+        setBarcodeLoading(false);
+        return;
+      }
+
+      // 2. Fetch from Backend API
+      const res = await fetchProducts({
+        search: term,
+        barcode: term,
+        per_page: 1,
+      });
+
+      const items = extractList(res).map(normalizeProduct);
+      const found = items.find(
+        (p) => p.barcode && p.barcode.toString().toLowerCase() === term.toLowerCase()
+      ) || items[0];
+
       if (found) {
         addToCart(found);
         setBarcodeInput("");
+      } else {
+        setSaleError(`বারকোড "${term}" দিয়ে কোনো পণ্য পাওয়া যায়নি`);
       }
     } catch (err) {
       setSaleError(err.message || "বারকোড খুঁজে পাওয়া যায়নি");
@@ -1415,8 +1912,10 @@ export default function SellPage() {
 
   const discountValue = discount
     ? Math.min(
-        discount.type === "percent" ? Math.round((subtotal * discount.amount) / 100) : Math.round(discount.amount),
-        subtotal
+        discount.type === "percent"
+          ? Math.round((subtotal * discount.amount) / 100)
+          : Math.round(discount.amount),
+        subtotal,
       )
     : 0;
   const othersValue = others ? Math.round(others.amount) : 0;
@@ -1425,8 +1924,7 @@ export default function SellPage() {
   const netTotal = subtotal - discountValue + othersValue;
   const payable = netTotal + preDue - returnValue;
 
-  // -- Confirm & create the sale on the server -----------------------------
- const handleConfirmOrder = async () => {
+  const handleConfirmOrder = async () => {
     setSaleLoading(true);
     setSaleError(null);
 
@@ -1438,16 +1936,14 @@ export default function SellPage() {
     }
 
     try {
-      // Total amount actually paid in this transaction
       const paidAmount = cashPay
         ? cashPay.received
         : cardPay
-        ? cardPay.amount
-        : multiPay
-        ? multiPay.cash + multiPay.bank
-        : 0;
+          ? cardPay.amount
+          : multiPay
+            ? multiPay.cash + multiPay.bank
+            : 0;
 
-      // Backend requires sale_date as a date string (YYYY-MM-DD)
       const saleDate = time.toISOString().slice(0, 10);
 
       const payload = {
@@ -1455,8 +1951,8 @@ export default function SellPage() {
         customer_id: selectedCustomer?.id ?? null,
         sale_date: saleDate,
         paid: paidAmount,
-        discount: discountValue,   // backend field is "discount", not "discount_type"/"discount_amount"
-        vat: othersValue,          // backend has no generic "others" field — mapped to "vat"
+        discount: discountValue,
+        vat: othersValue,
         items: cart.map((i) => ({
           product_id: i.id,
           quantity: i.qty,
@@ -1467,7 +1963,11 @@ export default function SellPage() {
       const res = await createSale(payload);
       const created = res?.data ?? res;
       setConfirmedSale({
-        invoiceNo: created?.invoice_no || created?.invoiceNo || created?.id || `INV-${Date.now()}`,
+        invoiceNo:
+          created?.invoice_no ||
+          created?.invoiceNo ||
+          created?.id ||
+          `INV-${Date.now()}`,
       });
       setModal("confirm");
     } catch (err) {
@@ -1477,21 +1977,46 @@ export default function SellPage() {
     }
   };
 
-  const invoiceNo = confirmedSale?.invoiceNo || `INV-${Math.floor(100000 + Math.random() * 900000)}`;
+  const invoiceNo =
+    confirmedSale?.invoiceNo ||
+    `INV-${Math.floor(100000 + Math.random() * 900000)}`;
 
   return (
-    <div className="min-h-screen flex flex-col" style={{ backgroundColor: C.paper, color: C.ink, fontFamily: FONT_BODY }}>
+    <div
+      className="min-h-screen flex flex-col"
+      style={{ backgroundColor: C.paper, color: C.ink, fontFamily: FONT_BODY }}
+    >
       {/* TOP BAR */}
-      <div className="border-b px-4 py-2.5 flex items-center gap-3 flex-wrap" style={{ backgroundColor: C.panel, borderColor: C.line }}>
-        <span className="font-bold text-[15px]" style={{ fontFamily: FONT_HEAD, color: C.plum }}>
+      <div
+        className="border-b px-4 py-2.5 flex items-center gap-3 flex-wrap"
+        style={{ backgroundColor: C.panel, borderColor: C.line }}
+      >
+        <span
+          className="font-bold text-[15px]"
+          style={{ fontFamily: FONT_HEAD, color: C.plum }}
+        >
           My Shop
         </span>
-        <span className="text-[12px]" style={{ color: C.muted }}>{time.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}</span>
+        <span className="text-[12px]" style={{ color: C.muted }}>
+          {time.toLocaleDateString("en-GB", {
+            day: "2-digit",
+            month: "short",
+            year: "numeric",
+          })}
+        </span>
         <span
           className="text-[12px] font-bold px-2.5 py-1 rounded-md"
-          style={{ backgroundColor: C.forestTint, color: C.forestDark, fontFamily: FONT_MONO }}
+          style={{
+            backgroundColor: C.forestTint,
+            color: C.forestDark,
+            fontFamily: FONT_MONO,
+          }}
         >
-          {time.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+          {time.toLocaleTimeString("en-US", {
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit",
+          })}
         </span>
 
         <div className="flex items-center gap-2 ml-2">
@@ -1533,21 +2058,38 @@ export default function SellPage() {
         </div>
 
         <div className="flex items-center gap-2 ml-auto">
-          <button onClick={resetSale} className="w-9 h-9 rounded-lg flex items-center justify-center text-white" style={{ backgroundColor: C.plum }} title="Clear">
+          <button
+            onClick={resetSale}
+            className="w-9 h-9 rounded-lg flex items-center justify-center text-white"
+            style={{ backgroundColor: C.plum }}
+            title="Clear"
+          >
             <Trash2 size={15} />
           </button>
           <button
             onClick={() => {
-              setActiveCatId((c) => c); // no-op change to retrigger effect deterministically
+              setActiveCatId((c) => c);
               setProductSearch((s) => s);
             }}
             className="w-9 h-9 rounded-lg flex items-center justify-center"
-            style={{ backgroundColor: C.paper, color: C.ink, border: `1px solid ${C.line}` }}
+            style={{
+              backgroundColor: C.paper,
+              color: C.ink,
+              border: `1px solid ${C.line}`,
+            }}
             title="Refresh"
           >
             <RefreshCw size={15} />
           </button>
-          <button className="w-9 h-9 rounded-lg flex items-center justify-center" style={{ backgroundColor: C.paper, color: C.ink, border: `1px solid ${C.line}` }} title="Collapse">
+          <button
+            className="w-9 h-9 rounded-lg flex items-center justify-center"
+            style={{
+              backgroundColor: C.paper,
+              color: C.ink,
+              border: `1px solid ${C.line}`,
+            }}
+            title="Collapse"
+          >
             <PanelLeftClose size={15} />
           </button>
           <button
@@ -1582,7 +2124,9 @@ export default function SellPage() {
             >
               <option value="">-- Category --</option>
               {categories.map((c) => (
-                <option key={c.id} value={c.id}>{c.name}</option>
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
               ))}
             </select>
             <select
@@ -1593,17 +2137,22 @@ export default function SellPage() {
             >
               <option value="">-- Brands --</option>
               {brands.map((b) => (
-                <option key={b.id} value={b.id}>{b.name}</option>
+                <option key={b.id} value={b.id}>
+                  {b.name}
+                </option>
               ))}
             </select>
           </div>
 
-          <div className="flex items-center gap-2 rounded-lg border px-3 py-2" style={{ borderColor: C.line, backgroundColor: C.panel }}>
+          <div
+            className="flex items-center gap-2 rounded-lg border px-3 py-2"
+            style={{ borderColor: C.line, backgroundColor: C.panel }}
+          >
             <Search size={14} style={{ color: C.muted }} />
             <input
               value={productSearch}
               onChange={(e) => setProductSearch(e.target.value)}
-              placeholder="Product Name"
+              placeholder="Product Name / Title"
               className="flex-1 text-[12.5px] outline-none bg-transparent"
               style={{ color: C.ink }}
             />
@@ -1611,28 +2160,43 @@ export default function SellPage() {
 
           <div className="grid grid-cols-2 gap-2.5 overflow-y-auto pr-1 pos-scroll">
             {productsLoading && (
-              <div className="col-span-2 flex items-center justify-center py-10" style={{ color: C.muted }}>
-                <Loader2 size={18} className="animate-spin mr-2" /> Loading products…
+              <div
+                className="col-span-2 flex items-center justify-center py-10"
+                style={{ color: C.muted }}
+              >
+                <Loader2 size={18} className="animate-spin mr-2" /> Loading
+                products…
               </div>
             )}
             {!productsLoading && productsError && (
-              <div className="col-span-2 text-center text-[12.5px] py-8" style={{ color: C.vermillion }}>
+              <div
+                className="col-span-2 text-center text-[12.5px] py-8"
+                style={{ color: C.vermillion }}
+              >
                 {productsError}
               </div>
             )}
             {!productsLoading && !productsError && products.length === 0 && (
-              <div className="col-span-2 text-center text-[12.5px] py-8" style={{ color: C.muted }}>
+              <div
+                className="col-span-2 text-center text-[12.5px] py-8"
+                style={{ color: C.muted }}
+              >
                 কোনো প্রোডাক্ট পাওয়া যায়নি
               </div>
             )}
             {!productsLoading &&
-              products.map((p, i) => <ProductCard key={p.id} p={p} i={i} onAdd={addToCart} />)}
+              products.map((p, i) => (
+                <ProductCard key={p.id} p={p} i={i} onAdd={addToCart} />
+              ))}
           </div>
         </div>
 
-        {/* MIDDLE — CART */}
+        {/* MIDDLE — CART & BARCODE SCANNER */}
         <div className="flex-1 flex flex-col gap-3 min-h-0">
-          <div className="rounded-xl border px-4 py-2.5 text-[12.5px] font-semibold" style={{ backgroundColor: C.panel, borderColor: C.line }}>
+          <div
+            className="rounded-xl border px-4 py-2.5 text-[12.5px] font-semibold"
+            style={{ backgroundColor: C.panel, borderColor: C.line }}
+          >
             {selectedCustomer ? selectedCustomer.name : "Walking Customer"}{" "}
             <span style={{ color: C.muted, fontWeight: 500 }}>
               {selectedCustomer
@@ -1642,16 +2206,25 @@ export default function SellPage() {
           </div>
 
           <div className="flex items-center gap-2">
-            <div className="flex-1 flex items-center gap-2 rounded-lg border px-3 py-2.5" style={{ borderColor: C.line, backgroundColor: C.panel }}>
+            <div
+              className="flex-1 flex items-center gap-2 rounded-lg border px-3 py-2.5"
+              style={{ borderColor: C.line, backgroundColor: C.panel }}
+            >
               <Barcode size={16} style={{ color: C.muted }} />
               <input
                 value={barcodeInput}
                 onChange={(e) => setBarcodeInput(e.target.value)}
                 onKeyDown={handleBarcodeSubmit}
-                placeholder="Scan or type barcode, then Enter"
+                placeholder="Scan or enter Barcode, then press Enter"
                 className="flex-1 text-[13px] outline-none bg-transparent"
               />
-              {barcodeLoading && <Loader2 size={14} className="animate-spin" style={{ color: C.muted }} />}
+              {barcodeLoading && (
+                <Loader2
+                  size={14}
+                  className="animate-spin"
+                  style={{ color: C.muted }}
+                />
+              )}
             </div>
             <div
               className="flex items-center gap-1.5 px-3 py-2.5 rounded-lg text-white font-bold text-[13px]"
@@ -1661,7 +2234,10 @@ export default function SellPage() {
             </div>
           </div>
 
-          <div className="flex-1 rounded-xl border overflow-hidden flex flex-col min-h-0" style={{ backgroundColor: C.panel, borderColor: C.line }}>
+          <div
+            className="flex-1 rounded-xl border overflow-hidden flex flex-col min-h-0"
+            style={{ backgroundColor: C.panel, borderColor: C.line }}
+          >
             <div
               className="grid grid-cols-[1fr_120px_100px_36px] text-[11.5px] font-bold text-white px-3 py-2.5"
               style={{ backgroundColor: C.plum }}
@@ -1673,7 +2249,10 @@ export default function SellPage() {
             </div>
             <div className="overflow-y-auto flex-1 pos-scroll">
               {cart.length === 0 ? (
-                <div className="h-full flex items-center justify-center text-[12.5px]" style={{ color: C.muted }}>
+                <div
+                  className="h-full flex items-center justify-center text-[12.5px]"
+                  style={{ color: C.muted }}
+                >
                   কার্ট খালি — বারকোড স্ক্যান করুন অথবা পণ্যে ক্লিক করুন
                 </div>
               ) : (
@@ -1681,11 +2260,18 @@ export default function SellPage() {
                   <div
                     key={c.id}
                     className="grid grid-cols-[1fr_120px_100px_36px] items-center px-3 py-2.5"
-                    style={i !== cart.length - 1 ? { borderBottom: `1px solid ${C.line}` } : undefined}
+                    style={
+                      i !== cart.length - 1
+                        ? { borderBottom: `1px solid ${C.line}` }
+                        : undefined
+                    }
                   >
                     <div>
                       <div className="text-[13px] font-semibold">{c.name}</div>
-                      <div className="text-[11px]" style={{ color: C.muted, fontFamily: FONT_MONO }}>
+                      <div
+                        className="text-[11px]"
+                        style={{ color: C.muted, fontFamily: FONT_MONO }}
+                      >
                         ৳{c.unit} / pc
                       </div>
                     </div>
@@ -1696,10 +2282,17 @@ export default function SellPage() {
                         onDecrement={() => decrementQty(c.id)}
                       />
                     </div>
-                    <div className="text-right text-[13px] font-bold" style={{ fontFamily: FONT_MONO }}>
+                    <div
+                      className="text-right text-[13px] font-bold"
+                      style={{ fontFamily: FONT_MONO }}
+                    >
                       ৳{(c.unit * c.qty).toLocaleString()}
                     </div>
-                    <button onClick={() => removeFromCart(c.id)} className="flex justify-center" style={{ color: C.vermillion }}>
+                    <button
+                      onClick={() => removeFromCart(c.id)}
+                      className="flex justify-center"
+                      style={{ color: C.vermillion }}
+                    >
                       <X size={15} />
                     </button>
                   </div>
@@ -1718,7 +2311,10 @@ export default function SellPage() {
 
         {/* RIGHT — SUMMARY */}
         <div className="w-[280px] shrink-0 flex flex-col gap-3">
-          <div className="relative rounded-xl border p-4 pt-5 overflow-hidden" style={{ backgroundColor: C.panel, borderColor: C.line }}>
+          <div
+            className="relative rounded-xl border p-4 pt-5 overflow-hidden"
+            style={{ backgroundColor: C.panel, borderColor: C.line }}
+          >
             <ScallopBorder id="summary-scallop" />
             <Row label="Total Gross" value={`৳${subtotal.toLocaleString()}`} />
             <Row
@@ -1726,8 +2322,15 @@ export default function SellPage() {
                 <span className="flex items-center gap-1.5">
                   DISCOUNT{discount ? "" : "(No)"}
                   {discount && (
-                    <span className="text-[10px] font-semibold" style={{ color: C.muted }}>
-                      ({discount.type === "percent" ? `${discount.amount}%` : "flat"})
+                    <span
+                      className="text-[10px] font-semibold"
+                      style={{ color: C.muted }}
+                    >
+                      (
+                      {discount.type === "percent"
+                        ? `${discount.amount}%`
+                        : "flat"}
+                      )
                     </span>
                   )}
                   <button
@@ -1759,12 +2362,19 @@ export default function SellPage() {
               value={`৳${othersValue.toLocaleString()}`}
             />
             <div className="h-px my-2" style={{ backgroundColor: C.line }} />
-            <Row label="Sub Total" value={`৳${netTotal.toLocaleString()}`} bold />
+            <Row
+              label="Sub Total"
+              value={`৳${netTotal.toLocaleString()}`}
+              bold
+            />
 
             {returnValue > 0 && (
               <Row
                 label={
-                  <span className="flex items-center gap-1.5" style={{ color: C.vermillion }}>
+                  <span
+                    className="flex items-center gap-1.5"
+                    style={{ color: C.vermillion }}
+                  >
                     <RotateCcw size={12} /> Return ({returnItems.length})
                     <button
                       type="button"
@@ -1785,16 +2395,25 @@ export default function SellPage() {
               style={{ backgroundColor: C.vermillion }}
             >
               <span className="text-[12.5px] font-bold">Pre Due</span>
-              <span className="text-[13px] font-bold" style={{ fontFamily: FONT_MONO }}>
+              <span
+                className="text-[13px] font-bold"
+                style={{ fontFamily: FONT_MONO }}
+              >
                 ৳{preDue}
               </span>
             </div>
 
             <div className="flex items-center justify-between mt-3">
-              <span className="text-[13.5px] font-bold" style={{ color: C.plum, fontFamily: FONT_HEAD }}>
+              <span
+                className="text-[13.5px] font-bold"
+                style={{ color: C.plum, fontFamily: FONT_HEAD }}
+              >
                 Total Payable
               </span>
-              <span className="text-[22px] font-bold" style={{ color: C.magenta, fontFamily: FONT_MONO }}>
+              <span
+                className="text-[22px] font-bold"
+                style={{ color: C.magenta, fontFamily: FONT_MONO }}
+              >
                 ৳{payable.toLocaleString()}
               </span>
             </div>
@@ -1820,9 +2439,12 @@ export default function SellPage() {
                 style={{ backgroundColor: C.magentaTint, color: C.magenta }}
               >
                 <span className="flex items-center gap-1">
-                  <Wallet size={12} /> Received ৳{cashPay.received.toLocaleString()}
+                  <Wallet size={12} /> Received ৳
+                  {cashPay.received.toLocaleString()}
                 </span>
-                {cashPay.change > 0 && <span>Change ৳{cashPay.change.toLocaleString()}</span>}
+                {cashPay.change > 0 && (
+                  <span>Change ৳{cashPay.change.toLocaleString()}</span>
+                )}
               </div>
             )}
 
@@ -1866,15 +2488,27 @@ export default function SellPage() {
 
           <button
             onClick={handleConfirmOrder}
-            disabled={(!cashPay && !cardPay && !multiPay) || saleLoading || cart.length === 0}
+            disabled={
+              (!cashPay && !cardPay && !multiPay) ||
+              saleLoading ||
+              cart.length === 0
+            }
             className="flex items-center justify-center gap-2 font-bold text-[13.5px] py-3 rounded-xl mt-1 transition-opacity"
             style={
               (cashPay || cardPay || multiPay) && !saleLoading
                 ? { backgroundColor: C.forest, color: "#fff" }
-                : { backgroundColor: C.line, color: C.muted, cursor: "not-allowed" }
+                : {
+                    backgroundColor: C.line,
+                    color: C.muted,
+                    cursor: "not-allowed",
+                  }
             }
           >
-            {saleLoading ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
+            {saleLoading ? (
+              <Loader2 size={16} className="animate-spin" />
+            ) : (
+              <CheckCircle2 size={16} />
+            )}
             {saleLoading ? "Saving…" : "Confirm Order"}
           </button>
         </div>
@@ -1904,7 +2538,11 @@ export default function SellPage() {
         />
       )}
       {modal === "others" && (
-        <OthersModal onClose={() => setModal(null)} onApply={setOthers} current={others} />
+        <OthersModal
+          onClose={() => setModal(null)}
+          onApply={setOthers}
+          current={others}
+        />
       )}
       {modal === "multipay" && (
         <MultiplePayModal
@@ -1951,18 +2589,21 @@ export default function SellPage() {
         />
       )}
       {modal === "return" && (
-  <ReturnModal
-    customer={selectedCustomer}
-    C={C}
-    FONT_MONO={FONT_MONO}
-    Modal={Modal}
-    onClose={() => setModal(null)}
-    onApplied={(items, apiResults) => {
-      setReturnItems((prev) => [...prev, ...items]);
-      
-    }}
-  />
-)}
+        <ReturnModal
+          customer={selectedCustomer}
+          C={C}
+          FONT_MONO={FONT_MONO}
+          Modal={Modal}
+          onClose={() => setModal(null)}
+          onApplied={(items, apiResults, refundInfo) => {
+            if (refundInfo?.refundAction === "direct") {
+              setReturnItems([]);
+            } else {
+              setReturnItems((prev) => [...prev, ...items]);
+            }
+          }}
+        />
+      )}
 
       <PrintMemo
         invoiceNo={invoiceNo}
@@ -1985,10 +2626,16 @@ export default function SellPage() {
 function Row({ label, value, bold }) {
   return (
     <div className="flex items-center justify-between py-1.5">
-      <span className={`text-[12.5px] ${bold ? "font-bold" : "font-semibold"}`} style={{ color: bold ? undefined : "#5B4E4A" }}>
+      <span
+        className={`text-[12.5px] ${bold ? "font-bold" : "font-semibold"}`}
+        style={{ color: bold ? undefined : "#5B4E4A" }}
+      >
         {label}
       </span>
-      <span className={`text-[13px] ${bold ? "font-bold" : "font-semibold"}`} style={{ fontFamily: FONT_MONO }}>
+      <span
+        className={`text-[13px] ${bold ? "font-bold" : "font-semibold"}`}
+        style={{ fontFamily: FONT_MONO }}
+      >
         {value}
       </span>
     </div>
