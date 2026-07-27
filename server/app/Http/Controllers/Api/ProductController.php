@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Brand;
 use App\Models\Category;
 use App\Models\Product;
+use App\Models\ProductStock;
 use App\Models\UnitType;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -68,7 +69,23 @@ class ProductController extends Controller
         $data['barcode'] = $data['barcode'] ?: $this->generateBarcode();
 
         $product = DB::transaction(function () use ($data) {
-            return Product::create(collect($data)->except(['image'])->toArray());
+            $product = Product::create(collect($data)->except(['image'])->toArray());
+
+            // Synchronize initial stock with ProductStock ledger
+            if (!empty($product->branch_id)) {
+                ProductStock::updateOrCreate(
+                    [
+                        'branch_id' => $product->branch_id,
+                        'product_id' => $product->id,
+                        'product_variant_id' => null,
+                    ],
+                    [
+                        'quantity' => $product->stock_qty ?? 0,
+                    ]
+                );
+            }
+
+            return $product;
         });
 
         return response()->json($product->load(['branch', 'brand', 'category', 'unitType']), 201);
@@ -109,6 +126,20 @@ class ProductController extends Controller
             }
 
             $product->update(collect($data)->except(['image'])->toArray());
+
+            // Synchronize updated stock quantity with ProductStock ledger
+            if (!empty($product->branch_id) && isset($data['stock_qty'])) {
+                ProductStock::updateOrCreate(
+                    [
+                        'branch_id' => $product->branch_id,
+                        'product_id' => $product->id,
+                        'product_variant_id' => null,
+                    ],
+                    [
+                        'quantity' => $product->stock_qty,
+                    ]
+                );
+            }
 
             return response()->json($product->fresh(['branch', 'brand', 'category', 'unitType']));
         });
@@ -172,9 +203,12 @@ class ProductController extends Controller
             $unitType = UnitType::firstOrCreate(['name' => $record['unit_type'] ?? 'Pcs']);
             $brand = ! empty($record['brand']) ? Brand::firstOrCreate(['name' => $record['brand']]) : null;
 
-            Product::create([
+            $productBranchId = $record['branch_id'] ?? $branchId;
+            $stockQty = $record['stock_qty'] ?? 0;
+
+            $product = Product::create([
                 'title'          => $record['title'],
-                'branch_id'      => $record['branch_id'] ?? $branchId,
+                'branch_id'      => $productBranchId,
                 'category_id'    => $category->id,
                 'unit_type_id'   => $unitType->id,
                 'brand_id'       => $brand?->id,
@@ -182,8 +216,23 @@ class ProductController extends Controller
                 'selling_price'  => $record['selling_price'] ?? 0,
                 'barcode'        => !empty($record['barcode']) ? $record['barcode'] : $this->generateBarcode(),
                 'alert_quantity' => $record['alert_quantity'] ?? 0,
-                'stock_qty'      => $record['stock_qty'] ?? 0,
+                'stock_qty'      => $stockQty,
             ]);
+
+            // Sync stock record into ProductStock
+            if (!empty($productBranchId)) {
+                ProductStock::updateOrCreate(
+                    [
+                        'branch_id' => $productBranchId,
+                        'product_id' => $product->id,
+                        'product_variant_id' => null,
+                    ],
+                    [
+                        'quantity' => $stockQty,
+                    ]
+                );
+            }
+
             $created++;
         }
 

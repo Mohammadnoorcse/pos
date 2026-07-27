@@ -17,4 +17,19 @@ class SaleItem extends Model
     {
         return $this->belongsTo(Product::class);
     }
+
+    public function returns()
+{
+    return $this->hasMany(SaleReturn::class);
+}
+
+    public function getReturnedQuantityAttribute()
+    {
+        return $this->returns()->sum('quantity');
+    }
+
+    public function getRemainingQuantityAttribute()
+    {
+        return $this->quantity - $this->returned_quantity;
+    }
 }

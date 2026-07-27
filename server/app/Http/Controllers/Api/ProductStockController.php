@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Product;
 use App\Models\ProductStock;
 use Illuminate\Http\Request;
 
@@ -11,37 +12,52 @@ class ProductStockController extends Controller
     /** GET /product-stocks — filterable stock ledger (Product Stocks page) */
     public function index(Request $request)
     {
-        $query = ProductStock::with(['product.brand', 'product.category', 'branch', 'variant.values']);
+        $query = Product::with(['category', 'brand']);
 
+        // Filter by Branch
         if ($request->filled('branch_id')) {
             $query->where('branch_id', $request->branch_id);
         }
+
+        // Active Stock (>0)
+        if ($request->boolean('active_only')) {
+            $query->where('stock_qty', '>', 0);
+        }
+
+        // Search Filter
         if ($request->filled('search')) {
             $search = $request->search;
-            $query->whereHas('product', fn ($q) => $q->where('title', 'like', "%{$search}%")
-                ->orWhere('barcode', 'like', "%{$search}%"));
+            $query->where(function ($q) use ($search) {
+                $q->where('title', 'like', "%{$search}%")
+                  ->orWhere('barcode', 'like', "%{$search}%");
+            });
         }
-        if ($request->boolean('active_only')) {
-            $query->where('quantity', '>', 0);
-        }
+
+        // Category Filter
         if ($request->filled('category_id')) {
-            $query->whereHas('product', fn ($q) => $q->where('category_id', $request->category_id));
+            $query->where('category_id', $request->category_id);
         }
+
+        // Brand Filter
         if ($request->filled('brand_id')) {
-            $query->whereHas('product', fn ($q) => $q->where('brand_id', $request->brand_id));
+            $query->where('brand_id', $request->brand_id);
         }
 
-        $stocks = $query->orderByDesc('id')->paginate($request->integer('per_page', 100));
+        $allProducts = (clone $query)->get();
 
-        $totals = (clone $query)->get();
+        // Calculate Summary
+        $totalPurchaseValue = $allProducts->sum(fn($p) => $p->stock_qty * $p->purchase_price);
+        $totalSaleValue     = $allProducts->sum(fn($p) => $p->stock_qty * $p->selling_price);
 
-        return response()->json([
-            'data' => $stocks,
+        $perPage = $request->integer('per_page', 100);
+        $paginated = $query->latest()->paginate($perPage);
+
+        return response()->json(array_merge($paginated->toArray(), [
             'summary' => [
-                'total_purchase_value' => $totals->sum(fn ($s) => $s->quantity * ($s->product->purchase_price ?? 0)),
-                'total_sale_value' => $totals->sum(fn ($s) => $s->quantity * ($s->product->selling_price ?? 0)),
-            ],
-        ]);
+                'total_purchase_value' => round($totalPurchaseValue, 2),
+                'total_sale_value'     => round($totalSaleValue, 2),
+            ]
+        ]));
     }
 
     /** POST /product-stocks/adjust — manual stock correction */
@@ -67,6 +83,13 @@ class ProductStockController extends Controller
             $stock->quantity = max(0, $stock->quantity + $data['quantity']);
         }
         $stock->save();
+
+        // Sync main product stock_qty field
+        $product = Product::find($data['product_id']);
+        if ($product) {
+            $product->stock_qty = $stock->quantity;
+            $product->save();
+        }
 
         return response()->json($stock->load(['product', 'branch']));
     }

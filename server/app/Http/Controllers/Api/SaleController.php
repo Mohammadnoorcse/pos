@@ -1,277 +1,175 @@
 <?php
 
 namespace App\Http\Controllers\Api;
-use App\Http\Controllers\Controller;
 
+use App\Http\Controllers\Controller;
+use App\Models\Payment;
+use App\Models\ProductStock;
 use App\Models\Sale;
 use App\Models\SaleItem;
-use App\Models\Payment;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Validator;
-use Illuminate\Validation\Rule;
+use Illuminate\Support\Str;
 
 class SaleController extends Controller
 {
-    /**
-     * GET /sales
-     * List sales with filters: branch_id, customer_id, status, date range, search by invoice.
-     */
     public function index(Request $request)
     {
-        $query = Sale::with(['branch', 'customer'])
-            ->withCount('items');
+        $query = Sale::with(['branch', 'customer', 'items.product']);
 
         if ($request->filled('branch_id')) {
             $query->where('branch_id', $request->branch_id);
         }
-
         if ($request->filled('customer_id')) {
             $query->where('customer_id', $request->customer_id);
         }
-
-        if ($request->filled('status')) {
-            $query->where('status', $request->status);
+        if ($request->filled('search')) {
+            $query->where('invoice_no', 'like', '%'.$request->search.'%');
         }
 
-        if ($request->filled('invoice_no')) {
-            $query->where('invoice_no', 'like', '%' . $request->invoice_no . '%');
-        }
-
-        if ($request->filled('date_from')) {
-            $query->whereDate('sale_date', '>=', $request->date_from);
-        }
-
-        if ($request->filled('date_to')) {
-            $query->whereDate('sale_date', '<=', $request->date_to);
-        }
-
-        $sales = $query->latest('sale_date')->paginate($request->get('per_page', 20));
-
-        return response()->json($sales);
+        return response()->json($query->latest()->paginate($request->integer('per_page', 25)));
     }
 
-    /**
-     * GET /sales/{sale}
-     */
     public function show(Sale $sale)
     {
-        $sale->load(['branch', 'customer', 'items.product', 'items.variant', 'payments']);
-
-        return response()->json($sale);
+        return response()->json($sale->load(['branch', 'customer', 'items.product', 'items.product.brand']));
     }
 
-    /**
-     * POST /sales
-     * Creates a sale with its line items, computes totals, and optionally records
-     * an initial payment. Wrapped in a transaction so partial writes never persist.
-     */
     public function store(Request $request)
     {
-        $validated = $this->validateSale($request);
+        $validated = $request->validate([
+            'branch_id' => 'required|exists:branches,id',
+            'customer_id' => 'nullable|exists:customers,id',
+            'discount' => 'nullable|numeric|min:0',
+            'vat' => 'nullable|numeric|min:0',
+            'paid' => 'required|numeric|min:0',
+            'sale_date' => 'required|date',
+            'items' => 'required|array|min:1',
+            'items.*.product_id' => 'required|exists:products,id',
+            'items.*.product_variant_id' => 'nullable|exists:product_variants,id',
+            'items.*.quantity' => 'required|integer|min:1',
+            'items.*.unit_price' => 'required|numeric|min:0',
+        ]);
 
-        $sale = DB::transaction(function () use ($validated) {
-            [$subTotal, $items] = $this->buildItems($validated['items']);
+        // Pre-validate stock levels to avoid internal 500 exceptions
+        foreach ($validated['items'] as $item) {
+            $stock = ProductStock::where('branch_id', $validated['branch_id'])
+                ->where('product_id', $item['product_id'])
+                ->where('product_variant_id', $item['product_variant_id'] ?? null)
+                ->first();
+
+            $availableQty = $stock ? $stock->quantity : 0;
+
+            if ($availableQty < $item['quantity']) {
+                return response()->json([
+                    'message' => "Insufficient stock for product ID {$item['product_id']}.",
+                    'errors' => [
+                        'items' => ["Product ID {$item['product_id']} has only {$availableQty} items available in stock."]
+                    ]
+                ], 422);
+            }
+        }
+
+        return DB::transaction(function () use ($validated, $request) {
+            $subTotal = 0;
+
+            // 1. Calculate Subtotal from items
+            foreach ($validated['items'] as $item) {
+                $subTotal += $item['quantity'] * $item['unit_price'];
+            }
 
             $discount = $validated['discount'] ?? 0;
             $vat = $validated['vat'] ?? 0;
-            $total = $subTotal - $discount + $vat;
-            $paid = $validated['paid'] ?? 0;
-            $due = max($total - $paid, 0);
+            $total = max(0, $subTotal - $discount + $vat);
+            $paid = min($total, $validated['paid']);
+            $due = max(0, $total - $paid);
 
+            $status = 'Paid';
+            if ($due > 0 && $paid > 0) {
+                $status = 'Partial';
+            } elseif ($due > 0 && $paid == 0) {
+                $status = 'Due';
+            }
+
+            // 2. Create Sale Record
             $sale = Sale::create([
-                'invoice_no' => $validated['invoice_no'] ?? $this->generateInvoiceNo(),
+                'invoice_no' => 'INV-'.strtoupper(Str::random(8)),
                 'branch_id' => $validated['branch_id'],
                 'customer_id' => $validated['customer_id'] ?? null,
-                'created_by' => auth()->id(),
+                'created_by' => $request->user()?->id,
                 'sub_total' => $subTotal,
                 'discount' => $discount,
                 'vat' => $vat,
                 'total' => $total,
                 'paid' => $paid,
                 'due' => $due,
-                'status' => $this->resolveStatus($paid, $total),
-                'sale_date' => $validated['sale_date'] ?? now()->toDateString(),
+                'status' => $status,
+                'sale_date' => $validated['sale_date'],
             ]);
 
-            foreach ($items as $item) {
-                $sale->items()->create($item);
+            // 3. Process Sale Items and Atomically Deduct Stock
+            foreach ($validated['items'] as $item) {
+                $itemTotal = $item['quantity'] * $item['unit_price'];
+
+                SaleItem::create([
+                    'sale_id' => $sale->id,
+                    'product_id' => $item['product_id'],
+                    'product_variant_id' => $item['product_variant_id'] ?? null,
+                    'quantity' => $item['quantity'],
+                    'unit_price' => $item['unit_price'],
+                    'total' => $itemTotal,
+                ]);
+
+                // Auto-deduct stock from the selected branch
+                ProductStock::deductStock(
+                    $sale->branch_id,
+                    $item['product_id'],
+                    $item['product_variant_id'] ?? null,
+                    $item['quantity']
+                );
             }
 
+            // 4. Record Payment Entry if payment was received
             if ($paid > 0) {
                 Payment::create([
                     'sale_id' => $sale->id,
                     'branch_id' => $sale->branch_id,
                     'amount' => $paid,
                     'type' => 'income',
-                    'paid_date' => $sale->sale_date,
+                    'paid_date' => $validated['sale_date'],
                 ]);
             }
 
-            return $sale;
+            return response()->json($sale->load(['items', 'customer']), 201);
         });
-
-        return response()->json($sale->load(['items', 'branch', 'customer']), 201);
     }
 
-    /**
-     * PUT/PATCH /sales/{sale}
-     * Replaces line items and recalculates totals. Does not touch payment history;
-     * use recordPayment() for collecting additional due amounts.
-     */
-    public function update(Request $request, Sale $sale)
+    public function returnableItems(Sale $sale)
     {
-        $validated = $this->validateSale($request, $sale->id);
+        $sale->load(['customer', 'items.product']);
 
-        $sale = DB::transaction(function () use ($validated, $sale) {
-            [$subTotal, $items] = $this->buildItems($validated['items']);
+        $items = $sale->items->map(function ($item) {
+            $returnedQty = $item->returns()->sum('quantity');
+            $remainingQty = $item->quantity - $returnedQty;
 
-            $discount = $validated['discount'] ?? $sale->discount;
-            $vat = $validated['vat'] ?? $sale->vat;
-            $total = $subTotal - $discount + $vat;
-            $due = max($total - $sale->paid, 0);
-
-            $sale->update([
-                'invoice_no' => $validated['invoice_no'] ?? $sale->invoice_no,
-                'branch_id' => $validated['branch_id'],
-                'customer_id' => $validated['customer_id'] ?? null,
-                'sub_total' => $subTotal,
-                'discount' => $discount,
-                'vat' => $vat,
-                'total' => $total,
-                'due' => $due,
-                'status' => $this->resolveStatus($sale->paid, $total),
-                'sale_date' => $validated['sale_date'] ?? $sale->sale_date,
-            ]);
-
-            $sale->items()->delete();
-            foreach ($items as $item) {
-                $sale->items()->create($item);
-            }
-
-            return $sale;
-        });
-
-        return response()->json($sale->load(['items', 'branch', 'customer']));
-    }
-
-    /**
-     * DELETE /sales/{sale}
-     */
-    public function destroy(Sale $sale)
-    {
-        $sale->delete();
-
-        return response()->json(['message' => 'Sale deleted successfully']);
-    }
-
-    /**
-     * POST /sales/{sale}/payments
-     * Records a due collection payment against an existing sale and updates
-     * the sale's paid/due/status fields accordingly.
-     */
-    public function recordPayment(Request $request, Sale $sale)
-    {
-        $validated = $request->validate([
-            'amount' => ['required', 'numeric', 'min:0.01', 'max:' . max($sale->due, 0)],
-            'paid_date' => ['nullable', 'date'],
-        ]);
-
-        $payment = DB::transaction(function () use ($validated, $sale) {
-            $payment = Payment::create([
-                'sale_id' => $sale->id,
-                'branch_id' => $sale->branch_id,
-                'amount' => $validated['amount'],
-                'type' => 'due_collection',
-                'paid_date' => $validated['paid_date'] ?? now()->toDateString(),
-            ]);
-
-            $paid = $sale->paid + $validated['amount'];
-            $due = max($sale->total - $paid, 0);
-
-            $sale->update([
-                'paid' => $paid,
-                'due' => $due,
-                'status' => $this->resolveStatus($paid, $sale->total),
-            ]);
-
-            return $payment;
-        });
+            return [
+                'sale_item_id'       => $item->id,
+                'product_id'         => $item->product_id,
+                'product_name'       => $item->product->name ?? null,
+                'unit_price'         => $item->unit_price,
+                'sold_quantity'      => $item->quantity,
+                'returned_quantity'  => $returnedQty,
+                'remaining_quantity' => $remainingQty,
+            ];
+        })->filter(fn ($i) => $i['remaining_quantity'] > 0)->values();
 
         return response()->json([
-            'payment' => $payment,
-            'sale' => $sale->fresh(),
-        ], 201);
-    }
-
-    /**
-     * Validate an incoming sale request. $saleId excludes the current record
-     * from the invoice_no unique check on update.
-     */
-    protected function validateSale(Request $request, ?int $saleId = null): array
-    {
-        return $request->validate([
-            'invoice_no' => [
-                'nullable', 'string',
-                Rule::unique('sales', 'invoice_no')->ignore($saleId),
+            'sale' => [
+                'id'         => $sale->id,
+                'invoice_no' => $sale->invoice_no,
+                'customer'   => $sale->customer,
             ],
-            'branch_id' => ['required', 'exists:branches,id'],
-            'customer_id' => ['nullable', 'exists:customers,id'],
-            'discount' => ['nullable', 'numeric', 'min:0'],
-            'vat' => ['nullable', 'numeric', 'min:0'],
-            'paid' => ['nullable', 'numeric', 'min:0'],
-            'sale_date' => ['nullable', 'date'],
-            'items' => ['required', 'array', 'min:1'],
-            'items.*.product_id' => ['required', 'exists:products,id'],
-            'items.*.product_variant_id' => ['nullable', 'exists:product_variants,id'],
-            'items.*.quantity' => ['required', 'integer', 'min:1'],
-            'items.*.unit_price' => ['required', 'numeric', 'min:0'],
+            'items' => $items,
         ]);
-    }
-
-    /**
-     * Builds line-item rows (with computed totals) and the overall sub-total
-     * from validated item input.
-     */
-    protected function buildItems(array $rawItems): array
-    {
-        $subTotal = 0;
-        $items = [];
-
-        foreach ($rawItems as $row) {
-            $lineTotal = $row['quantity'] * $row['unit_price'];
-            $subTotal += $lineTotal;
-
-            $items[] = [
-                'product_id' => $row['product_id'],
-                'product_variant_id' => $row['product_variant_id'] ?? null,
-                'quantity' => $row['quantity'],
-                'unit_price' => $row['unit_price'],
-                'total' => $lineTotal,
-            ];
-        }
-
-        return [$subTotal, $items];
-    }
-
-    protected function resolveStatus(float $paid, float $total): string
-    {
-        if ($paid <= 0) {
-            return 'Due';
-        }
-
-        if ($paid >= $total) {
-            return 'Paid';
-        }
-
-        return 'Partial';
-    }
-
-    protected function generateInvoiceNo(): string
-    {
-        $last = Sale::orderByDesc('id')->first();
-        $next = $last ? $last->id + 1 : 1;
-
-        return 'INV-' . now()->format('Ymd') . '-' . str_pad($next, 4, '0', STR_PAD_LEFT);
     }
 }

@@ -7,3 +7,4 @@ export { VariationsPage } from "./VariationsPage";
 export { UploadProductCSVPage } from "./UploadProductCSVPage";
 export { PrintBarcodeLabelsPage } from "./PrintBarcodeLabelsPage";
 export { ReturnableInvoices } from "./ReturnableInvoices";
+export { ProductSummaryPage } from "./ProductSummaryPage";

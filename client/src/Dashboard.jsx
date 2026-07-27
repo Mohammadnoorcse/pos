@@ -28,6 +28,7 @@ import {
   AllDamageProduct,
   SoldInvoices,
   ReturnableInvoices,
+  ProductSummaryPage
 } from "./components/pages";
 import { PAGE_LABELS } from "./constants";
 import { ProductsLedger } from "./components/pages/Ledgers/ProductsLedger";
@@ -126,6 +127,8 @@ export default function Dashboard({ user, onLogout }) {
       // Stock
       case "product-stocks":
         return <ProductStocksPage />;
+      case "product-summery":
+        return <ProductSummaryPage />;
       case "stock-alert-qty":
         return <StockAlertQtyPage />;
 

@@ -15,7 +15,9 @@ use App\Http\Controllers\Api\StockTransferController;
 use App\Http\Controllers\Api\UnitTypeController;
 use App\Http\Controllers\Api\VariationController;
 use App\Http\Controllers\Api\CustomerController;
+use App\Http\Controllers\Api\DamageController;
 use App\Http\Controllers\Api\SaleController;
+use App\Http\Controllers\Api\SaleReturnController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -79,5 +81,17 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/sales/{sale}/payments', [SaleController::class, 'recordPayment']);
     Route::apiResource('sales', SaleController::class);
     Route::apiResource('customers', CustomerController::class);
+    Route::get('/sales/{sale}/returnable-items', [SaleController::class, 'returnableItems']);
+
+    Route::prefix('sale-returns')->group(function () {
+    Route::get('/', [SaleReturnController::class, 'index']);
+    Route::post('/', [SaleReturnController::class, 'store']);
+    Route::get('/{id}', [SaleReturnController::class, 'show']);
+});
+
+    // demage product
+    Route::get('/damage-products', [DamageController::class, 'getProducts']);
+    Route::get('/damage-records', [DamageController::class, 'index']);
+    Route::post('/damage-records', [DamageController::class, 'store']);
 
 });

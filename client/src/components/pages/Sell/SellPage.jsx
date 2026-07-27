@@ -30,7 +30,7 @@ import {
   RotateCcw,
   Loader2,
 } from "lucide-react";
-
+import ReturnModal from "./ReturnModal"
 // ---------------------------------------------------------------------------
 // API SERVICES
 // Adjust the relative paths below to match where these files live in your
@@ -1272,121 +1272,7 @@ function SaleConfirmationModal({ onClose, onPrint, customer, items, subtotal, di
   );
 }
 
-/* ---------- Return Modal ---------- */
-function ReturnModal({ onClose, onApply, cartItems, current }) {
-  const [qtys, setQtys] = React.useState(() => {
-    const init = {};
-    cartItems.forEach((it) => {
-      const existing = current?.find((r) => r.id === it.id);
-      init[it.id] = existing ? existing.qty : 0;
-    });
-    return init;
-  });
 
-  const setQty = (id, max, delta) => {
-    setQtys((prev) => {
-      const next = Math.max(0, Math.min(max, (prev[id] || 0) + delta));
-      return { ...prev, [id]: next };
-    });
-  };
-
-  const selected = cartItems
-    .map((it) => ({ ...it, returnQty: qtys[it.id] || 0 }))
-    .filter((it) => it.returnQty > 0);
-
-  const returnTotal = selected.reduce((s, it) => s + it.unit * it.returnQty, 0);
-
-  return (
-    <Modal title="Return Products" subtitle="কোন পণ্য কত পরিমাণ ফেরত নিচ্ছেন বেছে নিন" onClose={onClose} wide>
-      <div className="rounded-lg border overflow-hidden mb-3.5" style={{ borderColor: C.line }}>
-        <div
-          className="grid grid-cols-[1fr_120px_90px] text-[10.5px] font-bold text-white px-3 py-2"
-          style={{ backgroundColor: C.vermillion }}
-        >
-          <div>Product</div>
-          <div className="text-center">Return Qty</div>
-          <div className="text-right">Amount</div>
-        </div>
-        {cartItems.length === 0 && (
-          <div className="text-center text-[12.5px] py-8" style={{ color: C.muted }}>
-            কার্টে কোনো পণ্য নেই
-          </div>
-        )}
-        {cartItems.map((it, i) => {
-          const q = qtys[it.id] || 0;
-          return (
-            <div
-              key={it.id}
-              className="grid grid-cols-[1fr_120px_90px] items-center px-3 py-2.5"
-              style={i !== cartItems.length - 1 ? { borderBottom: `1px solid ${C.line}` } : undefined}
-            >
-              <div>
-                <div className="text-[12.5px] font-semibold">{it.name}</div>
-                <div className="text-[10.5px]" style={{ color: C.muted, fontFamily: FONT_MONO }}>
-                  ৳{it.unit} × sold {it.qty}
-                </div>
-              </div>
-              <div className="flex items-center justify-center gap-1.5">
-                <button
-                  onClick={() => setQty(it.id, it.qty, -1)}
-                  className="w-6 h-6 rounded-md flex items-center justify-center border"
-                  style={{ borderColor: C.line, color: C.muted }}
-                >
-                  <Minus size={12} />
-                </button>
-                <span className="w-6 text-center text-[13px] font-bold" style={{ fontFamily: FONT_MONO }}>
-                  {q}
-                </span>
-                <button
-                  onClick={() => setQty(it.id, it.qty, 1)}
-                  className="w-6 h-6 rounded-md flex items-center justify-center text-white"
-                  style={{ backgroundColor: C.vermillion }}
-                >
-                  <Plus size={12} />
-                </button>
-              </div>
-              <div className="text-right text-[12.5px] font-bold" style={{ fontFamily: FONT_MONO }}>
-                ৳{(it.unit * q).toLocaleString()}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      <div
-        className="flex items-center justify-between rounded-lg px-3 py-2.5"
-        style={{ backgroundColor: C.vermillionTint, color: C.vermillion }}
-      >
-        <span className="text-[12.5px] font-bold flex items-center gap-1.5">
-          <RotateCcw size={14} /> Total Return Amount
-        </span>
-        <span className="text-[15px] font-bold" style={{ fontFamily: FONT_MONO }}>
-          ৳{returnTotal.toLocaleString()}
-        </span>
-      </div>
-
-      <div className="flex gap-2.5 mt-5">
-        <button
-          onClick={onClose}
-          className="flex-1 text-[13px] font-semibold py-2.5 rounded-lg border"
-          style={{ borderColor: C.line, color: C.muted }}
-        >
-          বাতিল
-        </button>
-        <button
-          onClick={() => {
-            onApply(selected.map((it) => ({ id: it.id, name: it.name, unit: it.unit, qty: it.returnQty })));
-            onClose();
-          }}
-          className="flex-1 flex items-center justify-center gap-1.5 text-[13px] font-bold py-2.5 rounded-lg text-white"
-          style={{ backgroundColor: C.vermillion }}
-        >
-          Confirm Return <ArrowRight size={14} />
-        </button>
-      </div>
-    </Modal>
-  );
-}
 
 export default function SellPage() {
   useGoogleFonts();
@@ -1540,7 +1426,7 @@ export default function SellPage() {
   const payable = netTotal + preDue - returnValue;
 
   // -- Confirm & create the sale on the server -----------------------------
-  const handleConfirmOrder = async () => {
+ const handleConfirmOrder = async () => {
     setSaleLoading(true);
     setSaleError(null);
 
@@ -1552,25 +1438,30 @@ export default function SellPage() {
     }
 
     try {
-      const paymentMethod = cashPay ? "cash" : cardPay ? "card" : multiPay ? "multiple" : null;
+      // Total amount actually paid in this transaction
+      const paidAmount = cashPay
+        ? cashPay.received
+        : cardPay
+        ? cardPay.amount
+        : multiPay
+        ? multiPay.cash + multiPay.bank
+        : 0;
+
+      // Backend requires sale_date as a date string (YYYY-MM-DD)
+      const saleDate = time.toISOString().slice(0, 10);
 
       const payload = {
         branch_id,
         customer_id: selectedCustomer?.id ?? null,
-        items: cart.map((i) => ({ product_id: i.id, quantity: i.qty, unit_price: i.unit })),
-        discount_type: discount?.type ?? null,
-        discount_amount: discountValue,
-        others_label: others?.label ?? null,
-        others_amount: othersValue,
-        return_items: returnItems.map((r) => ({ product_id: r.id, quantity: r.qty, unit_price: r.unit })),
-        return_amount: returnValue,
-        payment_method: paymentMethod,
-        cash_received: cashPay?.received ?? (multiPay?.cash ?? 0),
-        bank_amount: multiPay?.bank ?? (cardPay?.amount ?? 0),
-        bank_method: multiPay?.bankMethod ?? cardPay?.method ?? null,
-        reference_no: cardPay?.refNo ?? null,
-        subtotal,
-        payable,
+        sale_date: saleDate,
+        paid: paidAmount,
+        discount: discountValue,   // backend field is "discount", not "discount_type"/"discount_amount"
+        vat: othersValue,          // backend has no generic "others" field — mapped to "vat"
+        items: cart.map((i) => ({
+          product_id: i.id,
+          quantity: i.qty,
+          unit_price: i.unit,
+        })),
       };
 
       const res = await createSale(payload);
@@ -2060,13 +1951,18 @@ export default function SellPage() {
         />
       )}
       {modal === "return" && (
-        <ReturnModal
-          onClose={() => setModal(null)}
-          onApply={setReturnItems}
-          cartItems={cart}
-          current={returnItems}
-        />
-      )}
+  <ReturnModal
+    customer={selectedCustomer}
+    C={C}
+    FONT_MONO={FONT_MONO}
+    Modal={Modal}
+    onClose={() => setModal(null)}
+    onApplied={(items, apiResults) => {
+      setReturnItems((prev) => [...prev, ...items]);
+      
+    }}
+  />
+)}
 
       <PrintMemo
         invoiceNo={invoiceNo}
