@@ -1,20 +1,52 @@
-import React from "react";
-import { Search, Pencil, Trash2, Plus, Package, X } from "lucide-react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
+import { Search, Pencil, Trash2, Plus, Package, X, Loader2 } from "lucide-react";
 import { ScallopBorder } from "../../shared/ScallopBorder";
 import { FieldLabel } from "../../shared/FormElements";
-import { COLORS, PETALS, FONTS, DEFAULT_ALL_PRODUCTS } from "../../../constants";
+import { COLORS, PETALS, FONTS } from "../../../constants";
 
+// API Services
+import {
+  fetchProducts,
+  updateProduct,
+  deleteProduct,
+} from "../../../api/productService";
+import { fetchBranches } from "../../../api/branchService";
+
+/* ==========================================================================
+   1. EDIT PRODUCT MODAL COMPONENT
+   ========================================================================== */
 function EditProductModal({ product, onClose, onSave }) {
-  const [name, setName] = React.useState(product.name);
-  const [category, setCategory] = React.useState(product.category);
-  const [brand, setBrand] = React.useState(product.brand);
-  const [purchase, setPurchase] = React.useState(product.purchase);
-  const [selling, setSelling] = React.useState(product.selling);
-  const [stock, setStock] = React.useState(String(product.stock));
-  const inputRef = React.useRef(null);
+  const [title, setTitle] = useState(product.title || product.name || "");
+  const [branchId, setBranchId] = useState(
+    String(product.branch_id || product.branch?.id || "")
+  );
+  const [branches, setBranches] = useState([]);
+  const [purchasePrice, setPurchasePrice] = useState(
+    String(product.purchase_price || product.purchase || "")
+  );
+  const [sellingPrice, setSellingPrice] = useState(
+    String(product.selling_price || product.selling || "")
+  );
+  const [stockQty, setStockQty] = useState(
+    String(product.stock_qty ?? product.stock ?? "0")
+  );
+  const [loading, setLoading] = useState(false);
+  const inputRef = useRef(null);
 
-  React.useEffect(() => {
+  useEffect(() => {
     inputRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
+    const loadBranches = async () => {
+      try {
+        const res = await fetchBranches();
+        setBranches(res.data || res);
+      } catch (err) {
+        console.error("Failed to load branches:", err);
+      }
+    };
+    loadBranches();
   }, []);
 
   const fieldStyle = {
@@ -25,18 +57,31 @@ function EditProductModal({ product, onClose, onSave }) {
   };
   const fieldClass = "w-full rounded-lg px-3.5 py-2.5 text-[13px] border outline-none";
 
-  const handleSave = () => {
-    const trimmed = name.trim();
-    if (!trimmed) return;
-    onSave({
-      ...product,
-      name: trimmed,
-      category: category.trim() || product.category,
-      brand: brand.trim() || product.brand,
-      purchase: purchase.trim() || product.purchase,
-      selling: selling.trim() || product.selling,
-      stock: Math.max(0, Number(stock) || 0),
-    });
+  const handleSave = async () => {
+    const trimmedTitle = title.trim();
+    if (!trimmedTitle || !branchId) return;
+
+    setLoading(true);
+    try {
+      const payload = {
+        title: trimmedTitle,
+        branch_id: branchId,
+        purchase_price: parseFloat(purchasePrice) || 0,
+        selling_price: parseFloat(sellingPrice) || 0,
+        stock_qty: parseInt(stockQty, 10) || 0,
+        category_id: product.category_id || product.category?.id,
+        unit_type_id: product.unit_type_id || product.unit_type?.id,
+        brand_id: product.brand_id || product.brand?.id,
+      };
+
+      const updatedData = await updateProduct(product.id, payload);
+      // Fallback merge in case the API response doesn't echo stock_qty/branch back
+      onSave({ ...updatedData, stock_qty: payload.stock_qty, branch_id: payload.branch_id });
+    } catch (err) {
+      alert("Failed to update product: " + err.message);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -51,6 +96,8 @@ function EditProductModal({ product, onClose, onSave }) {
         onClick={(e) => e.stopPropagation()}
       >
         <ScallopBorder id="scallop-edit-product" colors={PETALS} />
+
+        {/* Modal Header */}
         <div className="flex items-center justify-between px-6 pt-7 pb-3 shrink-0">
           <h3
             className="font-bold text-[16px]"
@@ -67,34 +114,51 @@ function EditProductModal({ product, onClose, onSave }) {
           </button>
         </div>
 
+        {/* Modal Body */}
         <div className="px-6 pb-6 overflow-y-auto space-y-4">
           <div>
-            <FieldLabel required>Product Name</FieldLabel>
+            <FieldLabel required>Product Title</FieldLabel>
             <input
               ref={inputRef}
-              value={name}
-              onChange={(e) => setName(e.target.value)}
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
               className={fieldClass}
               style={fieldStyle}
             />
+          </div>
+
+          <div>
+            <FieldLabel required>Branch</FieldLabel>
+            <select
+              value={branchId}
+              onChange={(e) => setBranchId(e.target.value)}
+              className={fieldClass}
+              style={fieldStyle}
+              required
+            >
+              <option value="">-- Select Branch --</option>
+              {branches.map((br) => (
+                <option key={br.id} value={br.id}>{br.name}</option>
+              ))}
+            </select>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <FieldLabel>Category</FieldLabel>
               <input
-                value={category}
-                onChange={(e) => setCategory(e.target.value)}
-                className={fieldClass}
+                value={product.category?.name || product.category || "—"}
+                disabled
+                className={`${fieldClass} opacity-60 cursor-not-allowed`}
                 style={fieldStyle}
               />
             </div>
             <div>
               <FieldLabel>Brand</FieldLabel>
               <input
-                value={brand}
-                onChange={(e) => setBrand(e.target.value)}
-                className={fieldClass}
+                value={product.brand?.name || product.brand || "N/A"}
+                disabled
+                className={`${fieldClass} opacity-60 cursor-not-allowed`}
                 style={fieldStyle}
               />
             </div>
@@ -104,8 +168,10 @@ function EditProductModal({ product, onClose, onSave }) {
             <div>
               <FieldLabel>Purchase Price</FieldLabel>
               <input
-                value={purchase}
-                onChange={(e) => setPurchase(e.target.value)}
+                type="number"
+                step="0.01"
+                value={purchasePrice}
+                onChange={(e) => setPurchasePrice(e.target.value)}
                 className={fieldClass}
                 style={{ ...fieldStyle, fontFamily: FONTS.MONO }}
               />
@@ -113,27 +179,33 @@ function EditProductModal({ product, onClose, onSave }) {
             <div>
               <FieldLabel>Selling Price</FieldLabel>
               <input
-                value={selling}
-                onChange={(e) => setSelling(e.target.value)}
+                type="number"
+                step="0.01"
+                value={sellingPrice}
+                onChange={(e) => setSellingPrice(e.target.value)}
                 className={fieldClass}
                 style={{ ...fieldStyle, fontFamily: FONTS.MONO }}
               />
             </div>
             <div>
-              <FieldLabel>Stock</FieldLabel>
+              <FieldLabel>Stock Quantity</FieldLabel>
               <input
                 type="number"
-                value={stock}
-                onChange={(e) => setStock(e.target.value)}
+                min="0"
+                step="1"
+                value={stockQty}
+                onChange={(e) => setStockQty(e.target.value)}
                 className={fieldClass}
                 style={{ ...fieldStyle, fontFamily: FONTS.MONO }}
               />
             </div>
           </div>
 
+          {/* Modal Actions */}
           <div className="flex justify-end gap-2.5 pt-2">
             <button
               onClick={onClose}
+              type="button"
               className="font-semibold text-[13px] px-5 py-2.5 rounded-lg border"
               style={{
                 borderColor: COLORS.line,
@@ -145,14 +217,15 @@ function EditProductModal({ product, onClose, onSave }) {
             </button>
             <button
               onClick={handleSave}
-              disabled={!name.trim()}
-              className="text-white font-semibold text-[13px] px-5 py-2.5 rounded-lg shadow-md disabled:opacity-40"
+              disabled={!title.trim() || !branchId || loading}
+              className="text-white font-semibold text-[13px] px-5 py-2.5 rounded-lg shadow-md disabled:opacity-40 flex items-center gap-2"
               style={{
                 backgroundColor: COLORS.magenta,
                 boxShadow: `0 4px 10px ${COLORS.magenta}40`,
               }}
             >
-              Save Changes
+              {loading && <Loader2 size={14} className="animate-spin" />}
+              {loading ? "Saving..." : "Save Changes"}
             </button>
           </div>
         </div>
@@ -161,24 +234,62 @@ function EditProductModal({ product, onClose, onSave }) {
   );
 }
 
+/* ==========================================================================
+   2. MAIN ALL PRODUCTS PAGE COMPONENT
+   ========================================================================== */
 export function AllProductsPage({ onNavigate }) {
-  const [products, setProducts] = React.useState(DEFAULT_ALL_PRODUCTS);
-  const [query, setQuery] = React.useState("");
-  const [editingProduct, setEditingProduct] = React.useState(null);
+  const [products, setProducts] = useState([]);
+  const [query, setQuery] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [editingProduct, setEditingProduct] = useState(null);
 
-  const handleDelete = (id) => setProducts((prev) => prev.filter((p) => p.id !== id));
+  // 1. API থেকে প্রোডাক্ট লিস্ট নিয়ে আসা
+  const loadProducts = useCallback(async (searchQuery = "") => {
+    setLoading(true);
+    try {
+      const response = await fetchProducts({ search: searchQuery });
+      // Laravel Pagination response
+      setProducts(response.data || response);
+    } catch (err) {
+      console.error("Error fetching products:", err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
-  const handleSaveProduct = (updated) => {
-    setProducts((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
-    setEditingProduct(null);
+  // Initial Fetch
+  useEffect(() => {
+    loadProducts();
+  }, [loadProducts]);
+
+  // Search Debounce Effect
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      loadProducts(query);
+    }, 400);
+
+    return () => clearTimeout(timer);
+  }, [query, loadProducts]);
+
+  // 2. প্রোডাক্ট ডিলিট করা
+  const handleDelete = async (id) => {
+    if (!window.confirm("Are you sure you want to delete this product?")) return;
+
+    try {
+      await deleteProduct(id);
+      setProducts((prev) => prev.filter((p) => p.id !== id));
+    } catch (err) {
+      alert("Failed to delete product: " + err.message);
+    }
   };
 
-  const filtered = products.filter(
-    (p) =>
-      p.name.toLowerCase().includes(query.toLowerCase()) ||
-      p.category.toLowerCase().includes(query.toLowerCase()) ||
-      p.brand.toLowerCase().includes(query.toLowerCase())
-  );
+  // 3. এডিট করার পর UI আপডেট করা
+  const handleSaveProduct = (updated) => {
+    setProducts((prev) =>
+      prev.map((p) => (p.id === updated.id ? { ...p, ...updated } : p))
+    );
+    setEditingProduct(null);
+  };
 
   return (
     <div
@@ -186,6 +297,8 @@ export function AllProductsPage({ onNavigate }) {
       style={{ backgroundColor: COLORS.panel, borderColor: COLORS.line }}
     >
       <ScallopBorder id="scallop-all-products" colors={PETALS} />
+
+      {/* Header Section */}
       <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
         <h2
           className="font-bold text-[16px]"
@@ -193,7 +306,9 @@ export function AllProductsPage({ onNavigate }) {
         >
           All Products
         </h2>
+
         <div className="flex items-center gap-2.5 flex-wrap">
+          {/* Search Bar */}
           <div
             className="flex items-center gap-2 rounded-lg px-3.5 py-2 text-[13px] border"
             style={{
@@ -206,11 +321,13 @@ export function AllProductsPage({ onNavigate }) {
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search product, brand, category…"
+              placeholder="Search product, barcode…"
               className="bg-transparent outline-none text-[13px] w-44"
               style={{ color: COLORS.ink, fontFamily: FONTS.BODY }}
             />
           </div>
+
+          {/* Add New Product Button */}
           <button
             onClick={() => onNavigate && onNavigate("add-new-product")}
             className="text-white font-semibold text-[12.5px] px-4 py-2.5 rounded-lg flex items-center gap-1.5 shadow-md"
@@ -224,6 +341,7 @@ export function AllProductsPage({ onNavigate }) {
         </div>
       </div>
 
+      {/* Table Section */}
       <div className="overflow-x-auto">
         <table className="w-full text-[13px]">
           <thead>
@@ -239,6 +357,12 @@ export function AllProductsPage({ onNavigate }) {
                 style={{ borderColor: COLORS.line }}
               >
                 Product
+              </th>
+              <th
+                className="font-semibold text-[11px] uppercase tracking-wide pb-2.5 px-2.5 border-b"
+                style={{ borderColor: COLORS.line }}
+              >
+                Branch
               </th>
               <th
                 className="font-semibold text-[11px] uppercase tracking-wide pb-2.5 px-2.5 border-b"
@@ -279,91 +403,120 @@ export function AllProductsPage({ onNavigate }) {
             </tr>
           </thead>
           <tbody>
-            {filtered.map((p, i) => (
-              <tr
-                key={p.id}
-                style={
-                  i !== filtered.length - 1
-                    ? { borderBottom: `1px solid ${COLORS.line}` }
-                    : undefined
-                }
-              >
-                <td className="py-3 px-2.5" style={{ color: COLORS.muted, fontFamily: FONTS.MONO }}>
-                  {p.id}
-                </td>
-                <td className="py-3 px-2.5">
-                  <div className="flex items-center gap-2.5">
-                    <div
-                      className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
-                      style={{
-                        backgroundColor: COLORS.magentaTint,
-                        color: COLORS.magenta,
-                      }}
-                    >
-                      <Package size={14} />
-                    </div>
-                    <span className="font-semibold" style={{ color: COLORS.ink }}>
-                      {p.name}
-                    </span>
-                  </div>
-                </td>
-                <td className="py-3 px-2.5" style={{ color: COLORS.muted }}>
-                  {p.category}
-                </td>
-                <td className="py-3 px-2.5" style={{ color: COLORS.muted }}>
-                  {p.brand}
-                </td>
-                <td
-                  className="py-3 px-2.5 text-right font-semibold"
-                  style={{ fontFamily: FONTS.MONO, color: COLORS.ink }}
-                >
-                  ৳{p.purchase}
-                </td>
-                <td
-                  className="py-3 px-2.5 text-right font-semibold"
-                  style={{ fontFamily: FONTS.MONO, color: COLORS.ink }}
-                >
-                  ৳{p.selling}
-                </td>
-                <td className="py-3 px-2.5 text-center">
-                  <span
-                    className="text-[11px] font-bold px-2.5 py-1 rounded-full"
-                    style={
-                      p.stock <= 3
-                        ? {
-                            backgroundColor: COLORS.vermillionTint,
-                            color: COLORS.vermillion,
-                          }
-                        : { backgroundColor: COLORS.forestTint, color: COLORS.forestDark }
-                    }
-                  >
-                    {p.stock} pcs
-                  </span>
-                </td>
-                <td className="py-3 px-2.5">
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => setEditingProduct(p)}
-                      className="w-8 h-8 rounded-lg flex items-center justify-center text-white"
-                      style={{ backgroundColor: COLORS.peacock }}
-                    >
-                      <Pencil size={13} />
-                    </button>
-                    <button
-                      onClick={() => handleDelete(p.id)}
-                      className="w-8 h-8 rounded-lg flex items-center justify-center text-white"
-                      style={{ backgroundColor: COLORS.vermillion }}
-                    >
-                      <Trash2 size={13} />
-                    </button>
+            {loading ? (
+              <tr>
+                <td colSpan={9} className="py-12 text-center">
+                  <div className="flex items-center justify-center gap-2 text-sm" style={{ color: COLORS.muted }}>
+                    <Loader2 size={18} className="animate-spin" />
+                    Loading products...
                   </div>
                 </td>
               </tr>
-            ))}
-            {filtered.length === 0 && (
+            ) : products.length > 0 ? (
+              products.map((p, i) => {
+                const stockQty = p.stock_qty ?? p.stock ?? 0;
+                const categoryName = p.category?.name || p.category || "Uncategorized";
+                const brandName = p.brand?.name || p.brand || "—";
+                const branchName = p.branch?.name || p.branch || "—";
+                const title = p.title || p.name;
+
+                return (
+                  <tr
+                    key={p.id}
+                    style={
+                      i !== products.length - 1
+                        ? { borderBottom: `1px solid ${COLORS.line}` }
+                        : undefined
+                    }
+                  >
+                    <td className="py-3 px-2.5" style={{ color: COLORS.muted, fontFamily: FONTS.MONO }}>
+                      {p.id}
+                    </td>
+                    <td className="py-3 px-2.5">
+                      <div className="flex items-center gap-2.5">
+                        <div
+                          className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 overflow-hidden"
+                          style={{
+                            backgroundColor: COLORS.magentaTint,
+                            color: COLORS.magenta,
+                          }}
+                        >
+                          {p.image_path ? (
+                            <img
+                              src={`${import.meta.env.VITE_STORAGE_URL || "http://localhost:8000/storage"}/${p.image_path}`}
+                              alt={title}
+                              className="w-full h-full object-cover"
+                            />
+                          ) : (
+                            <Package size={14} />
+                          )}
+                        </div>
+                        <span className="font-semibold" style={{ color: COLORS.ink }}>
+                          {title}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="py-3 px-2.5" style={{ color: COLORS.muted }}>
+                      {branchName}
+                    </td>
+                    <td className="py-3 px-2.5" style={{ color: COLORS.muted }}>
+                      {categoryName}
+                    </td>
+                    <td className="py-3 px-2.5" style={{ color: COLORS.muted }}>
+                      {brandName}
+                    </td>
+                    <td
+                      className="py-3 px-2.5 text-right font-semibold"
+                      style={{ fontFamily: FONTS.MONO, color: COLORS.ink }}
+                    >
+                      ৳{parseFloat(p.purchase_price || p.purchase || 0).toFixed(2)}
+                    </td>
+                    <td
+                      className="py-3 px-2.5 text-right font-semibold"
+                      style={{ fontFamily: FONTS.MONO, color: COLORS.ink }}
+                    >
+                      ৳{parseFloat(p.selling_price || p.selling || 0).toFixed(2)}
+                    </td>
+                    <td className="py-3 px-2.5 text-center">
+                      <span
+                        className="text-[11px] font-bold px-2.5 py-1 rounded-full"
+                        style={
+                          stockQty <= (p.alert_quantity || 3)
+                            ? {
+                                backgroundColor: COLORS.vermillionTint,
+                                color: COLORS.vermillion,
+                              }
+                            : { backgroundColor: COLORS.forestTint, color: COLORS.forestDark }
+                        }
+                      >
+                        {stockQty} pcs
+                      </span>
+                    </td>
+                    <td className="py-3 px-2.5">
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => setEditingProduct(p)}
+                          className="w-8 h-8 rounded-lg flex items-center justify-center text-white transition-opacity hover:opacity-90"
+                          style={{ backgroundColor: COLORS.peacock }}
+                        >
+                          <Pencil size={13} />
+                        </button>
+                        <button
+                          onClick={() => handleDelete(p.id)}
+                          className="w-8 h-8 rounded-lg flex items-center justify-center text-white transition-opacity hover:opacity-90"
+                          style={{ backgroundColor: COLORS.vermillion }}
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })
+            ) : (
               <tr>
                 <td
-                  colSpan={8}
+                  colSpan={9}
                   className="py-8 text-center text-[13px]"
                   style={{ color: COLORS.muted }}
                 >
@@ -375,6 +528,7 @@ export function AllProductsPage({ onNavigate }) {
         </table>
       </div>
 
+      {/* Edit Modal Component */}
       {editingProduct && (
         <EditProductModal
           product={editingProduct}

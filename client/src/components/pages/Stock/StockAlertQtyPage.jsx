@@ -1,26 +1,68 @@
-import React from "react";
-import { Bell, Package, Search, ChevronDown, ChevronLeft, ChevronRight } from "lucide-react";
+import React, { useState, useEffect, useCallback } from "react";
+import { Bell, Package, Search, ChevronDown, ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
 import { ScallopBorder } from "../../shared/ScallopBorder";
-import { COLORS, PETALS, FONTS, DEFAULT_STOCK_ALERT_ITEMS } from "../../../constants";
+import { COLORS, PETALS, FONTS } from "../../../constants";
 import { stockAlertSeverity } from "../../../utils";
+import { fetchStockAlerts } from "../../../api/productStockService.js";
 
-export function StockAlertQtyPage() {
-  const [query, setQuery] = React.useState("");
-  const [showEntries, setShowEntries] = React.useState("100");
-  const [page, setPage] = React.useState(1);
+export function StockAlertQtyPage({ branchId = null }) {
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
-  const filtered = DEFAULT_STOCK_ALERT_ITEMS.filter(
-    (item) =>
-      item.name.toLowerCase().includes(query.toLowerCase()) ||
-      item.barcode.toLowerCase().includes(query.toLowerCase())
-  );
+  // Filters & Pagination State
+  const [query, setQuery] = useState("");
+  const [showEntries, setShowEntries] = useState("100");
+  const [page, setPage] = useState(1);
 
-  const pageSize = Number(showEntries) || filtered.length || 1;
-  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
-  const safePage = Math.min(page, totalPages);
-  const startIdx = filtered.length === 0 ? 0 : (safePage - 1) * pageSize + 1;
-  const endIdx = Math.min(safePage * pageSize, filtered.length);
-  const pageItems = filtered.slice((safePage - 1) * pageSize, safePage * pageSize);
+  // Pagination Metadata from Laravel API
+  const [paginationMeta, setPaginationMeta] = useState({
+    total: 0,
+    from: 0,
+    to: 0,
+    lastPage: 1,
+  });
+
+  // Fetch API Data
+  const loadAlerts = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      const params = {
+        page,
+        per_page: showEntries,
+      };
+
+      if (query.trim()) params.search = query.trim();
+      if (branchId) params.branch_id = branchId;
+
+      const res = await fetchStockAlerts(params);
+
+      // Map API response to Component State
+      setItems(res.data || []);
+      setPaginationMeta({
+        total: res.total || 0,
+        from: res.from || 0,
+        to: res.to || 0,
+        lastPage: res.last_page || 1,
+      });
+    } catch (err) {
+      console.error("Error fetching stock alerts:", err);
+      setError("স্টক অ্যালার্ট তথ্য লোড করতে ব্যর্থ হয়েছে।");
+    } finally {
+      setLoading(false);
+    }
+  }, [page, showEntries, query, branchId]);
+
+  // Debounce API Call on Search & Immediate Call on Page/Limit Change
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      loadAlerts();
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [loadAlerts]);
 
   return (
     <div
@@ -60,7 +102,7 @@ export function StockAlertQtyPage() {
             color: COLORS.vermillion,
           }}
         >
-          {filtered.length} {filtered.length === 1 ? "item" : "items"} need attention
+          {paginationMeta.total} {paginationMeta.total === 1 ? "item" : "items"} need attention
         </span>
       </div>
 
@@ -97,6 +139,7 @@ export function StockAlertQtyPage() {
           </div>
           entries
         </div>
+
         <div
           className="flex items-center gap-2 rounded-lg px-3.5 py-2 text-[13px] border"
           style={{
@@ -114,6 +157,7 @@ export function StockAlertQtyPage() {
               setQuery(e.target.value);
               setPage(1);
             }}
+            placeholder="Name or barcode..."
             className="bg-transparent outline-none text-[13px] w-40"
             style={{ color: COLORS.ink, fontFamily: FONTS.BODY }}
           />
@@ -153,87 +197,115 @@ export function StockAlertQtyPage() {
             </tr>
           </thead>
           <tbody>
-            {pageItems.map((item, i) => {
-              const severity = stockAlertSeverity(item);
-              return (
-                <tr
-                  key={item.id}
-                  style={
-                    i !== pageItems.length - 1
-                      ? { borderBottom: `1px dashed ${COLORS.line}` }
-                      : undefined
-                  }
-                >
-                  <td className="py-3.5 px-2.5">
-                    <div className="flex items-center gap-2.5">
-                      <div
-                        className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
-                        style={{
-                          backgroundColor: severity.bg,
-                          color: severity.color,
-                        }}
-                      >
-                        <Package size={14} />
-                      </div>
-                      <span className="font-semibold" style={{ color: COLORS.ink }}>
-                        {item.name}
-                      </span>
-                    </div>
-                  </td>
-                  <td className="py-3.5 px-2.5" style={{ color: COLORS.muted, fontFamily: FONTS.MONO }}>
-                    {item.barcode}
-                  </td>
-                  <td
-                    className="py-3.5 px-2.5 text-center font-semibold"
-                    style={{ color: COLORS.ink, fontFamily: FONTS.MONO }}
-                  >
-                    {item.alertQty}
-                  </td>
-                  <td className="py-3.5 px-2.5 text-center">
-                    <span
-                      className="text-[12.5px] font-bold px-2.5 py-1 rounded-lg"
-                      style={{
-                        backgroundColor: severity.bg,
-                        color: severity.color,
-                        fontFamily: FONTS.MONO,
-                      }}
-                      title={severity.label}
-                    >
-                      {item.currentStock}
-                    </span>
-                  </td>
-                </tr>
-              );
-            })}
-            {pageItems.length === 0 && (
+            {loading ? (
+              <tr>
+                <td colSpan={4} className="py-12 text-center text-slate-500">
+                  <div className="flex items-center justify-center gap-2">
+                    <Loader2 className="animate-spin" size={18} />
+                    <span>ডাটা লোড হচ্ছে...</span>
+                  </div>
+                </td>
+              </tr>
+            ) : error ? (
+              <tr>
+                <td colSpan={4} className="py-8 text-center text-red-500">
+                  {error}
+                </td>
+              </tr>
+            ) : items.length === 0 ? (
               <tr>
                 <td
                   colSpan={4}
                   className="py-10 text-center text-[13px]"
                   style={{ color: COLORS.muted }}
                 >
-                  No low-stock products match your search.
+                  No low-stock products match your criteria.
                 </td>
               </tr>
+            ) : (
+              items.map((item, i) => {
+                // Normalize snake_case API data for utility function
+                const normalizedItem = {
+                  ...item,
+                  name: item.title || item.name,
+                  alertQty: item.alert_quantity ?? item.alertQty,
+                  currentStock: item.current_stock ?? item.currentStock,
+                };
+
+                const severity = stockAlertSeverity(normalizedItem);
+
+                return (
+                  <tr
+                    key={item.id}
+                    style={
+                      i !== items.length - 1
+                        ? { borderBottom: `1px dashed ${COLORS.line}` }
+                        : undefined
+                    }
+                  >
+                    <td className="py-3.5 px-2.5">
+                      <div className="flex items-center gap-2.5">
+                        <div
+                          className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
+                          style={{
+                            backgroundColor: severity.bg,
+                            color: severity.color,
+                          }}
+                        >
+                          <Package size={14} />
+                        </div>
+                        <span className="font-semibold" style={{ color: COLORS.ink }}>
+                          {item.title || item.name}
+                        </span>
+                      </div>
+                    </td>
+                    <td
+                      className="py-3.5 px-2.5"
+                      style={{ color: COLORS.muted, fontFamily: FONTS.MONO }}
+                    >
+                      {item.barcode || "—"}
+                    </td>
+                    <td
+                      className="py-3.5 px-2.5 text-center font-semibold"
+                      style={{ color: COLORS.ink, fontFamily: FONTS.MONO }}
+                    >
+                      {item.alert_quantity}
+                    </td>
+                    <td className="py-3.5 px-2.5 text-center">
+                      <span
+                        className="text-[12.5px] font-bold px-2.5 py-1 rounded-lg"
+                        style={{
+                          backgroundColor: severity.bg,
+                          color: severity.color,
+                          fontFamily: FONTS.MONO,
+                        }}
+                        title={severity.label}
+                      >
+                        {item.current_stock}
+                      </span>
+                    </td>
+                  </tr>
+                );
+              })
             )}
           </tbody>
         </table>
       </div>
 
-      {/* FOOTER: entry count + pagination */}
+      {/* FOOTER: Entry count + Pagination */}
       <div
         className="px-5 py-4 mt-2 flex items-center justify-between flex-wrap gap-3"
         style={{ borderTop: `1px dashed ${COLORS.line}` }}
       >
         <span className="text-[12.5px]" style={{ color: COLORS.muted }}>
-          {filtered.length === 0
+          {paginationMeta.total === 0
             ? "Showing 0 entries"
-            : `Showing ${startIdx} to ${endIdx} of ${filtered.length} entries`}
+            : `Showing ${paginationMeta.from} to ${paginationMeta.to} of ${paginationMeta.total} entries`}
         </span>
         <div className="flex items-center gap-1.5">
           <button
             onClick={() => setPage((p) => Math.max(1, p - 1))}
-            disabled={safePage <= 1}
+            disabled={page <= 1 || loading}
             className="flex items-center gap-1 text-[12.5px] font-semibold px-3 py-1.5 rounded-lg border disabled:opacity-40"
             style={{
               borderColor: COLORS.line,
@@ -251,11 +323,11 @@ export function StockAlertQtyPage() {
               fontFamily: FONTS.MONO,
             }}
           >
-            {safePage}
+            {page}
           </span>
           <button
-            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-            disabled={safePage >= totalPages}
+            onClick={() => setPage((p) => Math.min(paginationMeta.lastPage, p + 1))}
+            disabled={page >= paginationMeta.lastPage || loading}
             className="flex items-center gap-1 text-[12.5px] font-semibold px-3 py-1.5 rounded-lg border disabled:opacity-40"
             style={{
               borderColor: COLORS.line,

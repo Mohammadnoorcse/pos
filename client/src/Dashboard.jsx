@@ -37,12 +37,12 @@ import { DueConnectionReportPage, DuePurchaseReportPage, ProductReturnPage, Prod
 import { CurrentStockInfoPage, GodownDashboardPage, StockTransferPage,StockTransferInvoicesPage,StockInOutReportPage } from "./components/Godown";
 import { BankDetailsPage,CashFlowPage,ContraTransferPage,TakeCustomerDuePage,SupplierPaymentAcc, ExpensesAcc,IncomesAcc,VouchersAcc,LoanCapitalPage} from "./components/Acc";
 
-// NOTE: point this at wherever SellPage.jsx actually lives in your project,
-// e.g. "./components/pages/Sell/SellPage" or "./components/pages/SellPage"
-import SellPage from "./components/pages/Sell/SellPage";
+
+import SellPage  from "./components/pages/Sell/SellPage";
 
 
-export default function Dashboard() {
+// user, onLogout -> App.js theke ashche (logged-in user + logout handler)
+export default function Dashboard({ user, onLogout }) {
   useGoogleFonts();
 
   const {
@@ -223,6 +223,8 @@ export default function Dashboard() {
 
   return (
     <MainLayout
+      user={user}
+      onLogout={onLogout}
       activePage={activePage}
       onNavigate={setActivePage}
     >

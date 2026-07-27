@@ -28,7 +28,22 @@ import {
   FileText,
   CheckCircle2,
   RotateCcw,
+  Loader2,
 } from "lucide-react";
+
+// ---------------------------------------------------------------------------
+// API SERVICES
+// Adjust the relative paths below to match where these files live in your
+// project (e.g. "../services/productService").
+// ---------------------------------------------------------------------------
+import { fetchProducts } from "../../../api/productService";
+import { fetchCategories } from "../../../api/categoryService";
+import { fetchBrands } from "../../../api/brandService";
+import {
+  fetchCustomers,
+  createCustomer,
+} from "../../../api/customerService";
+import { createSale } from "../../../api/saleService";
 
 /* Same "Rickshaw-art ledger" palette used across the app */
 const C = {
@@ -129,6 +144,82 @@ function usePrintStyle() {
   }, []);
 }
 
+// ---------------------------------------------------------------------------
+// Small debounce hook — used for the product/customer search boxes so we
+// don't fire a request on every keystroke.
+// ---------------------------------------------------------------------------
+function useDebouncedValue(value, delay = 400) {
+  const [debounced, setDebounced] = React.useState(value);
+  React.useEffect(() => {
+    const t = setTimeout(() => setDebounced(value), delay);
+    return () => clearTimeout(t);
+  }, [value, delay]);
+  return debounced;
+}
+
+// ---------------------------------------------------------------------------
+// Reads the logged-in user object from localStorage and returns their
+// branch_id. Adjust the localStorage key ("user") if your auth flow stores
+// it under a different key (e.g. "auth_user").
+// ---------------------------------------------------------------------------
+function getBranchId() {
+  try {
+    const raw = localStorage.getItem("user");
+    if (!raw) return null;
+    const user = JSON.parse(raw);
+    return user?.branch_id ?? user?.branch?.id ?? null;
+  } catch {
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Normalizers — the backend's field names may differ from what this UI
+// expects. Adjust these mapping functions to match your actual API
+// response shape (checked via console.log on first load if unsure).
+// ---------------------------------------------------------------------------
+function normalizeProduct(p) {
+  const stock = p.stock ?? p.quantity ?? p.stock_quantity ?? 0;
+  return {
+    id: p.id,
+    name: p.name ?? p.product_name ?? "Unnamed",
+    price: Number(p.price ?? p.selling_price ?? p.sale_price ?? 0),
+    stock,
+    low: stock > 0 && stock <= (p.low_stock_threshold ?? 10),
+    img: p.image_url || p.thumbnail || "📦",
+    barcode: p.barcode ?? p.sku ?? null,
+    category_id: p.category_id ?? p.category?.id ?? null,
+    brand_id: p.brand_id ?? p.brand?.id ?? null,
+  };
+}
+
+function normalizeCategory(c) {
+  return { id: c.id, name: c.name ?? c.category_name ?? "Unnamed" };
+}
+
+function normalizeBrand(b) {
+  return { id: b.id, name: b.name ?? b.brand_name ?? "Unnamed" };
+}
+
+function normalizeCustomer(c) {
+  return {
+    id: c.id,
+    name: c.name ?? c.customer_name ?? "Unnamed",
+    phone: c.phone ?? c.phone_number ?? "",
+    area: c.address ?? c.area ?? "",
+    due: Number(c.due ?? c.due_amount ?? c.balance ?? 0),
+  };
+}
+
+// Pull a list out of whatever shape the API returns:
+// { data: [...] }, { data: { data: [...] } } (Laravel paginator), or a bare array.
+function extractList(res) {
+  if (Array.isArray(res)) return res;
+  if (Array.isArray(res?.data)) return res.data;
+  if (Array.isArray(res?.data?.data)) return res.data.data;
+  return [];
+}
+
 const petals = [C.magenta, C.marigold, C.peacock];
 
 function ScallopBorder({ id }) {
@@ -146,32 +237,6 @@ function ScallopBorder({ id }) {
   );
 }
 
-const categories = ["সব", "Grocery", "Cosmetics", "Footwear", "Oil & Ghee", "Stationery"];
-
-const products = [
-  { name: "Fresh Facial Tissue", price: 301, img: "🧻", stock: 18 },
-  { name: "Ghee 800gm", price: 350, img: "🫙", stock: 9 },
-  { name: "Mens Shoes 102 (30)", price: 1500, img: "👞", stock: 3, low: true },
-  { name: "Akher Chini (Sugar) 50gm", price: 2450, img: "🧂", stock: 22 },
-  { name: "Starship Fortified Soyabean Oil", price: 500, img: "🛢️", stock: 14 },
-  { name: "Matador Sharpener", price: 10, img: "✏️", stock: 40 },
-  { name: "Baby Shampoo 200ml", price: 220, img: "🧴", stock: 6, low: true },
-  { name: "Notebook 200pg", price: 60, img: "📓", stock: 30 },
-];
-
-const cartItems = [
-  { name: "Ghee 800gm", unit: 350, qty: 2 },
-  { name: "Mens Shoes 102 (30)", unit: 1500, qty: 1 },
-];
-
-const customers = [
-  { name: "Rafiq Hasan", phone: "01711-223344", area: "Mirpur-2", due: 1850 },
-  { name: "Nadia Akter", phone: "01812-445566", area: "Uttara", due: 0 },
-  { name: "Shakil Islam", phone: "01919-778899", area: "Mirpur-2", due: 5400 },
-  { name: "Mahin Jaman", phone: "01611-990011", area: "Dhanmondi", due: 900 },
-  { name: "Tania Rahman", phone: "01511-334455", area: "Banani", due: 0 },
-];
-
 function useClock() {
   const [time, setTime] = React.useState(new Date());
   React.useEffect(() => {
@@ -181,10 +246,11 @@ function useClock() {
   return time;
 }
 
-function Stepper({ value }) {
+function Stepper({ value, onIncrement, onDecrement }) {
   return (
     <div className="flex items-center gap-1.5">
       <button
+        onClick={onDecrement}
         className="w-6 h-6 rounded-md flex items-center justify-center border"
         style={{ borderColor: C.line, color: C.muted }}
       >
@@ -194,6 +260,7 @@ function Stepper({ value }) {
         {value}
       </span>
       <button
+        onClick={onIncrement}
         className="w-6 h-6 rounded-md flex items-center justify-center text-white"
         style={{ backgroundColor: C.magenta }}
       >
@@ -203,9 +270,10 @@ function Stepper({ value }) {
   );
 }
 
-function ProductCard({ p, i }) {
+function ProductCard({ p, i, onAdd }) {
   return (
     <div
+      onClick={() => onAdd(p)}
       className="relative rounded-xl border overflow-hidden cursor-pointer group"
       style={{ backgroundColor: C.panel, borderColor: C.line }}
     >
@@ -219,10 +287,14 @@ function ProductCard({ p, i }) {
         </span>
       )}
       <div
-        className="h-20 flex items-center justify-center text-3xl mt-1"
+        className="h-20 flex items-center justify-center text-3xl mt-1 overflow-hidden"
         style={{ backgroundColor: C.paper }}
       >
-        {p.img}
+        {p.img && p.img.startsWith("http") ? (
+          <img src={p.img} alt={p.name} className="w-full h-full object-cover" />
+        ) : (
+          p.img
+        )}
       </div>
       <div className="p-2.5">
         <div className="text-[12.5px] font-semibold leading-snug line-clamp-2 min-h-[32px]">{p.name}</div>
@@ -316,42 +388,109 @@ function Field({ label, icon: Icon, placeholder, type = "text", full, value, onC
   );
 }
 
-function NewCustomerModal({ onClose }) {
+/* ---------- New Customer Modal (now creates a real customer via the API) ---------- */
+function NewCustomerModal({ onClose, onCreated }) {
+  const [form, setForm] = React.useState({
+    name: "",
+    phone: "",
+    email: "",
+    opening_due: "",
+    address: "",
+  });
+  const [saving, setSaving] = React.useState(false);
+  const [error, setError] = React.useState(null);
+
+  const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }));
+
+  const handleSave = async () => {
+    if (!form.name.trim() || !form.phone.trim()) {
+      setError("নাম ও ফোন নম্বর আবশ্যক");
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await createCustomer({
+        name: form.name,
+        phone: form.phone,
+        email: form.email || undefined,
+        opening_due: form.opening_due ? Number(form.opening_due) : 0,
+        address: form.address || undefined,
+        branch_id: getBranchId(),
+      });
+      const created = res?.data ?? res;
+      onCreated && onCreated(normalizeCustomer(created));
+      onClose();
+    } catch (err) {
+      setError(err.message || "কাস্টমার তৈরি করা যায়নি");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <Modal title="New Customer" subtitle="নতুন কাস্টমারের তথ্য যোগ করুন" onClose={onClose} wide>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-        <Field label="Customer Name *" icon={CircleUserRound} placeholder="যেমন: Rafiq Hasan" />
-        <Field label="Phone Number *" icon={Phone} placeholder="01XXX-XXXXXX" />
-        <Field label="Email" icon={Mail} placeholder="optional" type="email" />
-        <Field label="Opening Due (৳)" icon={Coins} placeholder="0" type="number" />
-        <Field label="Address" icon={MapPin} placeholder="বাসা, রোড, এলাকা" full />
+        <Field label="Customer Name *" icon={CircleUserRound} placeholder="যেমন: Rafiq Hasan" value={form.name} onChange={set("name")} />
+        <Field label="Phone Number *" icon={Phone} placeholder="01XXX-XXXXXX" value={form.phone} onChange={set("phone")} />
+        <Field label="Email" icon={Mail} placeholder="optional" type="email" value={form.email} onChange={set("email")} />
+        <Field label="Opening Due (৳)" icon={Coins} placeholder="0" type="number" value={form.opening_due} onChange={set("opening_due")} />
+        <Field label="Address" icon={MapPin} placeholder="বাসা, রোড, এলাকা" full value={form.address} onChange={set("address")} />
       </div>
+
+      {error && (
+        <div className="text-[12px] font-semibold mt-3" style={{ color: C.vermillion }}>
+          {error}
+        </div>
+      )}
 
       <div className="flex gap-2.5 mt-5">
         <button
           onClick={onClose}
+          disabled={saving}
           className="flex-1 text-[13px] font-semibold py-2.5 rounded-lg border"
           style={{ borderColor: C.line, color: C.muted }}
         >
           বাতিল
         </button>
         <button
-          onClick={onClose}
-          className="flex-1 flex items-center justify-center gap-1.5 text-[13px] font-bold py-2.5 rounded-lg text-white"
+          onClick={handleSave}
+          disabled={saving}
+          className="flex-1 flex items-center justify-center gap-1.5 text-[13px] font-bold py-2.5 rounded-lg text-white disabled:opacity-60"
           style={{ backgroundColor: C.magenta }}
         >
-          Save Customer <ArrowRight size={14} />
+          {saving ? <Loader2 size={14} className="animate-spin" /> : <>Save Customer <ArrowRight size={14} /></>}
         </button>
       </div>
     </Modal>
   );
 }
 
+/* ---------- Customer List Modal (now searches customers via the API) ---------- */
 function CustomerListModal({ onClose, onSelect }) {
   const [q, setQ] = React.useState("");
-  const filtered = customers.filter(
-    (c) => c.name.toLowerCase().includes(q.toLowerCase()) || c.phone.includes(q)
-  );
+  const debouncedQ = useDebouncedValue(q, 350);
+  const [customers, setCustomers] = React.useState([]);
+  const [loading, setLoading] = React.useState(false);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    fetchCustomers(debouncedQ ? { search: debouncedQ } : {})
+      .then((res) => {
+        if (cancelled) return;
+        setCustomers(extractList(res).map(normalizeCustomer));
+      })
+      .catch(() => {
+        if (!cancelled) setCustomers([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [debouncedQ]);
 
   return (
     <Modal title="Select Customer" subtitle="নাম বা ফোন নম্বর দিয়ে খুঁজুন" onClose={onClose}>
@@ -368,17 +507,18 @@ function CustomerListModal({ onClose, onSelect }) {
           className="flex-1 text-[13px] outline-none bg-transparent"
           style={{ color: C.ink }}
         />
+        {loading && <Loader2 size={14} className="animate-spin" style={{ color: C.muted }} />}
       </div>
 
       <div className="space-y-2">
-        {filtered.length === 0 && (
+        {!loading && customers.length === 0 && (
           <div className="text-center text-[12.5px] py-8" style={{ color: C.muted }}>
             কোনো কাস্টমার পাওয়া যায়নি
           </div>
         )}
-        {filtered.map((c) => (
+        {customers.map((c) => (
           <button
-            key={c.phone}
+            key={c.id}
             onClick={() => onSelect && onSelect(c)}
             className="w-full flex items-center gap-3 p-2.5 rounded-xl border text-left transition-colors hover:bg-opacity-60"
             style={{ borderColor: C.line, backgroundColor: C.paper }}
@@ -559,7 +699,6 @@ function PrintMemo({ invoiceNo, time, customer, items, subtotal, discount, disco
         margin: "0 auto",
       }}
     >
-      {/* HEADER — company info */}
       <div style={{ textAlign: "center", paddingBottom: 10 }}>
         <div style={{ fontSize: 21, fontWeight: 800, color: dark, letterSpacing: "0.3px" }}>
           Spire Technology Ltd
@@ -577,13 +716,11 @@ function PrintMemo({ invoiceNo, time, customer, items, subtotal, discount, disco
         </div>
       </div>
 
-      {/* MEMO META */}
       <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, padding: "8px 0", color: "#5B4E4A" }}>
         <span>Memo No: <b style={{ color: "#2B2320" }}>{invoiceNo}</b></span>
         <span>{time.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })} &nbsp;{time.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}</span>
       </div>
 
-      {/* CLIENT INFO — middle, boxed */}
       <div
         style={{
           border: "1px solid #E8D9BE",
@@ -607,7 +744,6 @@ function PrintMemo({ invoiceNo, time, customer, items, subtotal, discount, disco
         </div>
       </div>
 
-      {/* ITEMS TABLE */}
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5 }}>
         <thead>
           <tr style={{ borderTop: `1.5px solid ${dark}`, borderBottom: `1.5px solid ${dark}` }}>
@@ -619,7 +755,7 @@ function PrintMemo({ invoiceNo, time, customer, items, subtotal, discount, disco
         </thead>
         <tbody>
           {items.map((it, i) => (
-            <tr key={it.name} style={{ borderBottom: i === items.length - 1 ? "none" : "1px dotted #E8D9BE" }}>
+            <tr key={it.id ?? it.name} style={{ borderBottom: i === items.length - 1 ? "none" : "1px dotted #E8D9BE" }}>
               <td style={{ padding: "5px 2px" }}>{it.name}</td>
               <td style={{ textAlign: "center", padding: "5px 2px" }}>{it.qty}</td>
               <td style={{ textAlign: "right", padding: "5px 2px" }}>{it.unit}</td>
@@ -629,7 +765,6 @@ function PrintMemo({ invoiceNo, time, customer, items, subtotal, discount, disco
         </tbody>
       </table>
 
-      {/* TOTALS */}
       <div style={{ marginTop: 10, paddingTop: 8, borderTop: `1.5px solid ${dark}` }}>
         <div style={{ display: "flex", justifyContent: "space-between", padding: "2px 0" }}>
           <span>Total Gross</span>
@@ -677,7 +812,6 @@ function PrintMemo({ invoiceNo, time, customer, items, subtotal, discount, disco
         </div>
       </div>
 
-      {/* FOOTER */}
       <div style={{ textAlign: "center", marginTop: 16, paddingTop: 10, borderTop: "1px dashed #C9B79A" }}>
         <div style={{ fontSize: 12, fontWeight: 700, color: dark }}>ধন্যবাদ, আবার আসবেন!</div>
         <div style={{ fontSize: 10.5, color: "#8C7B6B", marginTop: 2 }}>Thank you for shopping with Spire Technology Ltd</div>
@@ -688,7 +822,7 @@ function PrintMemo({ invoiceNo, time, customer, items, subtotal, discount, disco
 
 const bankMethods = ["bKash", "Nagad", "Rocket", "Upay", "Bank Transfer", "Debit/Credit Card"];
 
-/* ---------- Multiple Pay Modal (split Cash + Bank/MFS) ---------- */
+/* ---------- Multiple Pay Modal ---------- */
 function MultiplePayModal({ onClose, onApply, payable, current, onConfirmed }) {
   const [cash, setCash] = React.useState(current?.cash ? String(current.cash) : "");
   const [bank, setBank] = React.useState(current?.bank ? String(current.bank) : "");
@@ -974,7 +1108,7 @@ function CardPayModal({ onClose, onApply, payable, current, onConfirmed }) {
   );
 }
 
-/* ---------- Sale Confirmation Modal (full details + print) ---------- */
+/* ---------- Sale Confirmation Modal ---------- */
 function SaleConfirmationModal({ onClose, onPrint, customer, items, subtotal, discount, discountValue, others, othersValue, returnItems, returnValue, preDue, payable, cashPay, cardPay, multiPay }) {
   return (
     <Modal title="Sale Confirmed" subtitle="বিক্রয়ের সম্পূর্ণ বিবরণ" onClose={onClose} wide>
@@ -991,7 +1125,6 @@ function SaleConfirmationModal({ onClose, onPrint, customer, items, subtotal, di
         <span className="text-[13px] font-bold">Sale completed successfully</span>
       </div>
 
-      {/* Customer */}
       <div className="rounded-lg border px-3 py-2.5 mb-3" style={{ borderColor: C.line, backgroundColor: C.paper }}>
         <div className="text-[10px] font-bold uppercase tracking-wide mb-1" style={{ color: C.muted }}>
           Customer
@@ -1004,7 +1137,6 @@ function SaleConfirmationModal({ onClose, onPrint, customer, items, subtotal, di
         )}
       </div>
 
-      {/* Items */}
       <div className="rounded-lg border overflow-hidden mb-3" style={{ borderColor: C.line }}>
         <div
           className="grid grid-cols-[1fr_50px_70px] text-[10.5px] font-bold text-white px-3 py-2"
@@ -1016,7 +1148,7 @@ function SaleConfirmationModal({ onClose, onPrint, customer, items, subtotal, di
         </div>
         {items.map((it, i) => (
           <div
-            key={it.name}
+            key={it.id ?? it.name}
             className="grid grid-cols-[1fr_50px_70px] px-3 py-2 text-[12px]"
             style={i !== items.length - 1 ? { borderBottom: `1px solid ${C.line}` } : undefined}
           >
@@ -1029,7 +1161,6 @@ function SaleConfirmationModal({ onClose, onPrint, customer, items, subtotal, di
         ))}
       </div>
 
-      {/* Returned Items */}
       {returnItems && returnItems.length > 0 && (
         <div className="rounded-lg border overflow-hidden mb-3" style={{ borderColor: C.vermillion }}>
           <div
@@ -1040,7 +1171,7 @@ function SaleConfirmationModal({ onClose, onPrint, customer, items, subtotal, di
           </div>
           {returnItems.map((it, i) => (
             <div
-              key={it.name}
+              key={it.id ?? it.name}
               className="grid grid-cols-[1fr_50px_70px] px-3 py-2 text-[12px]"
               style={{ backgroundColor: C.vermillionTint, borderBottom: i !== returnItems.length - 1 ? "1px solid #fff" : undefined }}
             >
@@ -1054,7 +1185,6 @@ function SaleConfirmationModal({ onClose, onPrint, customer, items, subtotal, di
         </div>
       )}
 
-      {/* Totals */}
       <div className="rounded-lg border px-3 py-2.5 mb-3" style={{ borderColor: C.line, backgroundColor: C.paper }}>
         <Row label="Total Gross" value={`৳${subtotal.toLocaleString()}`} />
         {discount && discountValue > 0 && (
@@ -1067,7 +1197,6 @@ function SaleConfirmationModal({ onClose, onPrint, customer, items, subtotal, di
         <Row label="Total Payable" value={`৳${payable.toLocaleString()}`} bold />
       </div>
 
-      {/* Payment method */}
       <div className="rounded-lg px-3 py-2.5 mb-1" style={{ backgroundColor: C.magentaTint }}>
         <div className="text-[10px] font-bold uppercase tracking-wide mb-1.5" style={{ color: C.magenta }}>
           Payment Details
@@ -1143,26 +1272,26 @@ function SaleConfirmationModal({ onClose, onPrint, customer, items, subtotal, di
   );
 }
 
-/* ---------- Return Modal (select products & qty to return) ---------- */
+/* ---------- Return Modal ---------- */
 function ReturnModal({ onClose, onApply, cartItems, current }) {
   const [qtys, setQtys] = React.useState(() => {
     const init = {};
     cartItems.forEach((it) => {
-      const existing = current?.find((r) => r.name === it.name);
-      init[it.name] = existing ? existing.qty : 0;
+      const existing = current?.find((r) => r.id === it.id);
+      init[it.id] = existing ? existing.qty : 0;
     });
     return init;
   });
 
-  const setQty = (name, max, delta) => {
+  const setQty = (id, max, delta) => {
     setQtys((prev) => {
-      const next = Math.max(0, Math.min(max, (prev[name] || 0) + delta));
-      return { ...prev, [name]: next };
+      const next = Math.max(0, Math.min(max, (prev[id] || 0) + delta));
+      return { ...prev, [id]: next };
     });
   };
 
   const selected = cartItems
-    .map((it) => ({ ...it, returnQty: qtys[it.name] || 0 }))
+    .map((it) => ({ ...it, returnQty: qtys[it.id] || 0 }))
     .filter((it) => it.returnQty > 0);
 
   const returnTotal = selected.reduce((s, it) => s + it.unit * it.returnQty, 0);
@@ -1184,10 +1313,10 @@ function ReturnModal({ onClose, onApply, cartItems, current }) {
           </div>
         )}
         {cartItems.map((it, i) => {
-          const q = qtys[it.name] || 0;
+          const q = qtys[it.id] || 0;
           return (
             <div
-              key={it.name}
+              key={it.id}
               className="grid grid-cols-[1fr_120px_90px] items-center px-3 py-2.5"
               style={i !== cartItems.length - 1 ? { borderBottom: `1px solid ${C.line}` } : undefined}
             >
@@ -1199,7 +1328,7 @@ function ReturnModal({ onClose, onApply, cartItems, current }) {
               </div>
               <div className="flex items-center justify-center gap-1.5">
                 <button
-                  onClick={() => setQty(it.name, it.qty, -1)}
+                  onClick={() => setQty(it.id, it.qty, -1)}
                   className="w-6 h-6 rounded-md flex items-center justify-center border"
                   style={{ borderColor: C.line, color: C.muted }}
                 >
@@ -1209,7 +1338,7 @@ function ReturnModal({ onClose, onApply, cartItems, current }) {
                   {q}
                 </span>
                 <button
-                  onClick={() => setQty(it.name, it.qty, 1)}
+                  onClick={() => setQty(it.id, it.qty, 1)}
                   className="w-6 h-6 rounded-md flex items-center justify-center text-white"
                   style={{ backgroundColor: C.vermillion }}
                 >
@@ -1246,7 +1375,7 @@ function ReturnModal({ onClose, onApply, cartItems, current }) {
         </button>
         <button
           onClick={() => {
-            onApply(selected.map((it) => ({ name: it.name, unit: it.unit, qty: it.returnQty })));
+            onApply(selected.map((it) => ({ id: it.id, name: it.name, unit: it.unit, qty: it.returnQty })));
             onClose();
           }}
           className="flex-1 flex items-center justify-center gap-1.5 text-[13px] font-bold py-2.5 rounded-lg text-white"
@@ -1264,19 +1393,139 @@ export default function SellPage() {
   useScrollbarStyle();
   usePrintStyle();
   const time = useClock();
-  const [activeCat, setActiveCat] = React.useState("সব");
-  const [modal, setModal] = React.useState(null); // null | "customer" | "newCustomer" | "discount" | "others"
-  const [selectedCustomer, setSelectedCustomer] = React.useState(null);
-  const [discount, setDiscount] = React.useState(null); // { type: 'flat'|'percent', amount }
-  const [others, setOthers] = React.useState(null); // { label, amount }
-  const [invoiceNo] = React.useState(() => `INV-${Math.floor(100000 + Math.random() * 900000)}`);
-  const [multiPay, setMultiPay] = React.useState(null); // { cash, bank }
-  const [cashPay, setCashPay] = React.useState(null); // { received, change }
-  const [cardPay, setCardPay] = React.useState(null); // { method, refNo, amount }
-  const [returnItems, setReturnItems] = React.useState([]); // [{ name, unit, qty }]
 
-  const subtotal = cartItems.reduce((s, i) => s + i.unit * i.qty, 0);
-  const preDue = 0;
+  // -- Catalog data (products / categories / brands) --------------------
+  const [products, setProducts] = React.useState([]);
+  const [productsLoading, setProductsLoading] = React.useState(false);
+  const [productsError, setProductsError] = React.useState(null);
+
+  const [categories, setCategories] = React.useState([]); // [{id, name}]
+  const [brands, setBrands] = React.useState([]); // [{id, name}]
+
+  const [activeCatId, setActiveCatId] = React.useState(""); // "" = all
+  const [activeBrandId, setActiveBrandId] = React.useState(""); // "" = all
+  const [productSearch, setProductSearch] = React.useState("");
+  const debouncedProductSearch = useDebouncedValue(productSearch, 350);
+
+  const [barcodeInput, setBarcodeInput] = React.useState("");
+  const [barcodeLoading, setBarcodeLoading] = React.useState(false);
+
+  // -- Cart / sale state --------------------------------------------------
+  const [cart, setCart] = React.useState([]); // [{id, name, unit, qty}]
+  const [modal, setModal] = React.useState(null);
+  const [selectedCustomer, setSelectedCustomer] = React.useState(null);
+  const [discount, setDiscount] = React.useState(null);
+  const [others, setOthers] = React.useState(null);
+  const [multiPay, setMultiPay] = React.useState(null);
+  const [cashPay, setCashPay] = React.useState(null);
+  const [cardPay, setCardPay] = React.useState(null);
+  const [returnItems, setReturnItems] = React.useState([]);
+
+  const [saleLoading, setSaleLoading] = React.useState(false);
+  const [saleError, setSaleError] = React.useState(null);
+  const [confirmedSale, setConfirmedSale] = React.useState(null); // { invoiceNo, ...serverResponse }
+
+  // -- Load categories & brands once --------------------------------------
+  React.useEffect(() => {
+    fetchCategories()
+      .then((res) => setCategories(extractList(res).map(normalizeCategory)))
+      .catch(() => setCategories([]));
+    fetchBrands()
+      .then((res) => setBrands(extractList(res).map(normalizeBrand)))
+      .catch(() => setBrands([]));
+  }, []);
+
+  // -- Load products whenever filters change ------------------------------
+  React.useEffect(() => {
+    let cancelled = false;
+    setProductsLoading(true);
+    setProductsError(null);
+
+    const params = { active_only: 1 };
+    if (activeCatId) params.category_id = activeCatId;
+    if (activeBrandId) params.brand_id = activeBrandId;
+    if (debouncedProductSearch) params.search = debouncedProductSearch;
+
+    fetchProducts(params)
+      .then((res) => {
+        if (cancelled) return;
+        setProducts(extractList(res).map(normalizeProduct));
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setProductsError(err.message || "প্রোডাক্ট লোড করা যায়নি");
+        setProducts([]);
+      })
+      .finally(() => {
+        if (!cancelled) setProductsLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeCatId, activeBrandId, debouncedProductSearch]);
+
+  // -- Cart helpers ---------------------------------------------------------
+  const addToCart = (product) => {
+    setCart((prev) => {
+      const existing = prev.find((i) => i.id === product.id);
+      if (existing) {
+        return prev.map((i) =>
+          i.id === product.id ? { ...i, qty: i.qty + 1 } : i
+        );
+      }
+      return [...prev, { id: product.id, name: product.name, unit: product.price, qty: 1 }];
+    });
+  };
+
+  const incrementQty = (id) =>
+    setCart((prev) => prev.map((i) => (i.id === id ? { ...i, qty: i.qty + 1 } : i)));
+
+  const decrementQty = (id) =>
+    setCart((prev) =>
+      prev
+        .map((i) => (i.id === id ? { ...i, qty: i.qty - 1 } : i))
+        .filter((i) => i.qty > 0)
+    );
+
+  const removeFromCart = (id) => setCart((prev) => prev.filter((i) => i.id !== id));
+
+  const resetSale = () => {
+    setCart([]);
+    setSelectedCustomer(null);
+    setDiscount(null);
+    setOthers(null);
+    setMultiPay(null);
+    setCashPay(null);
+    setCardPay(null);
+    setReturnItems([]);
+    setConfirmedSale(null);
+    setSaleError(null);
+  };
+
+  // -- Barcode scan: look up the product and add it straight to the cart --
+  const handleBarcodeSubmit = async (e) => {
+    if (e.key !== "Enter" || !barcodeInput.trim()) return;
+    setBarcodeLoading(true);
+    try {
+      // NOTE: productService has no dedicated "lookup by barcode" endpoint,
+      // so this reuses the list endpoint's `search` param. If your backend
+      // exposes a barcode-specific filter, swap `search` for that key.
+      const res = await fetchProducts({ search: barcodeInput.trim(), per_page: 1 });
+      const found = extractList(res).map(normalizeProduct)[0];
+      if (found) {
+        addToCart(found);
+        setBarcodeInput("");
+      }
+    } catch (err) {
+      setSaleError(err.message || "বারকোড খুঁজে পাওয়া যায়নি");
+    } finally {
+      setBarcodeLoading(false);
+    }
+  };
+
+  const subtotal = cart.reduce((s, i) => s + i.unit * i.qty, 0);
+  const preDue = selectedCustomer?.due ?? 0;
 
   const discountValue = discount
     ? Math.min(
@@ -1289,6 +1538,55 @@ export default function SellPage() {
 
   const netTotal = subtotal - discountValue + othersValue;
   const payable = netTotal + preDue - returnValue;
+
+  // -- Confirm & create the sale on the server -----------------------------
+  const handleConfirmOrder = async () => {
+    setSaleLoading(true);
+    setSaleError(null);
+
+    const branch_id = getBranchId();
+    if (!branch_id) {
+      setSaleError("Branch ID পাওয়া যায়নি। অনুগ্রহ করে আবার লগইন করুন।");
+      setSaleLoading(false);
+      return;
+    }
+
+    try {
+      const paymentMethod = cashPay ? "cash" : cardPay ? "card" : multiPay ? "multiple" : null;
+
+      const payload = {
+        branch_id,
+        customer_id: selectedCustomer?.id ?? null,
+        items: cart.map((i) => ({ product_id: i.id, quantity: i.qty, unit_price: i.unit })),
+        discount_type: discount?.type ?? null,
+        discount_amount: discountValue,
+        others_label: others?.label ?? null,
+        others_amount: othersValue,
+        return_items: returnItems.map((r) => ({ product_id: r.id, quantity: r.qty, unit_price: r.unit })),
+        return_amount: returnValue,
+        payment_method: paymentMethod,
+        cash_received: cashPay?.received ?? (multiPay?.cash ?? 0),
+        bank_amount: multiPay?.bank ?? (cardPay?.amount ?? 0),
+        bank_method: multiPay?.bankMethod ?? cardPay?.method ?? null,
+        reference_no: cardPay?.refNo ?? null,
+        subtotal,
+        payable,
+      };
+
+      const res = await createSale(payload);
+      const created = res?.data ?? res;
+      setConfirmedSale({
+        invoiceNo: created?.invoice_no || created?.invoiceNo || created?.id || `INV-${Date.now()}`,
+      });
+      setModal("confirm");
+    } catch (err) {
+      setSaleError(err.message || "সেল তৈরি করা যায়নি");
+    } finally {
+      setSaleLoading(false);
+    }
+  };
+
+  const invoiceNo = confirmedSale?.invoiceNo || `INV-${Math.floor(100000 + Math.random() * 900000)}`;
 
   return (
     <div className="min-h-screen flex flex-col" style={{ backgroundColor: C.paper, color: C.ink, fontFamily: FONT_BODY }}>
@@ -1344,10 +1642,18 @@ export default function SellPage() {
         </div>
 
         <div className="flex items-center gap-2 ml-auto">
-          <button className="w-9 h-9 rounded-lg flex items-center justify-center text-white" style={{ backgroundColor: C.plum }} title="Clear">
+          <button onClick={resetSale} className="w-9 h-9 rounded-lg flex items-center justify-center text-white" style={{ backgroundColor: C.plum }} title="Clear">
             <Trash2 size={15} />
           </button>
-          <button className="w-9 h-9 rounded-lg flex items-center justify-center" style={{ backgroundColor: C.paper, color: C.ink, border: `1px solid ${C.line}` }} title="Refresh">
+          <button
+            onClick={() => {
+              setActiveCatId((c) => c); // no-op change to retrigger effect deterministically
+              setProductSearch((s) => s);
+            }}
+            className="w-9 h-9 rounded-lg flex items-center justify-center"
+            style={{ backgroundColor: C.paper, color: C.ink, border: `1px solid ${C.line}` }}
+            title="Refresh"
+          >
             <RefreshCw size={15} />
           </button>
           <button className="w-9 h-9 rounded-lg flex items-center justify-center" style={{ backgroundColor: C.paper, color: C.ink, border: `1px solid ${C.line}` }} title="Collapse">
@@ -1364,44 +1670,72 @@ export default function SellPage() {
         </div>
       </div>
 
+      {saleError && (
+        <div
+          className="mx-4 mt-2 px-3 py-2 rounded-lg text-[12.5px] font-semibold"
+          style={{ backgroundColor: C.vermillionTint, color: C.vermillion }}
+        >
+          {saleError}
+        </div>
+      )}
+
       <div className="flex-1 flex gap-4 p-4 min-h-0">
         {/* LEFT — PRODUCTS */}
         <div className="w-[420px] shrink-0 flex flex-col gap-3 min-h-0">
           <div className="flex gap-2">
-            <select className="flex-1 text-[12.5px] font-semibold rounded-lg border px-3 py-2" style={{ borderColor: C.line, color: C.ink }}>
-              <option>-- Category --</option>
+            <select
+              value={activeCatId}
+              onChange={(e) => setActiveCatId(e.target.value)}
+              className="flex-1 text-[12.5px] font-semibold rounded-lg border px-3 py-2"
+              style={{ borderColor: C.line, color: C.ink }}
+            >
+              <option value="">-- Category --</option>
+              {categories.map((c) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
             </select>
-            <select className="flex-1 text-[12.5px] font-semibold rounded-lg border px-3 py-2" style={{ borderColor: C.line, color: C.ink }}>
-              <option>-- Brands --</option>
+            <select
+              value={activeBrandId}
+              onChange={(e) => setActiveBrandId(e.target.value)}
+              className="flex-1 text-[12.5px] font-semibold rounded-lg border px-3 py-2"
+              style={{ borderColor: C.line, color: C.ink }}
+            >
+              <option value="">-- Brands --</option>
+              {brands.map((b) => (
+                <option key={b.id} value={b.id}>{b.name}</option>
+              ))}
             </select>
           </div>
 
           <div className="flex items-center gap-2 rounded-lg border px-3 py-2" style={{ borderColor: C.line, backgroundColor: C.panel }}>
             <Search size={14} style={{ color: C.muted }} />
-            <input placeholder="Product Name" className="flex-1 text-[12.5px] outline-none bg-transparent" style={{ color: C.ink }} />
-          </div>
-
-          <div className="flex gap-1.5 overflow-x-auto pb-1 pos-scroll">
-            {categories.map((c) => (
-              <button
-                key={c}
-                onClick={() => setActiveCat(c)}
-                className="shrink-0 text-[11.5px] font-semibold px-3 py-1.5 rounded-full border transition-colors"
-                style={
-                  activeCat === c
-                    ? { backgroundColor: C.magenta, color: "#fff", borderColor: C.magenta }
-                    : { backgroundColor: C.panel, color: C.muted, borderColor: C.line }
-                }
-              >
-                {c}
-              </button>
-            ))}
+            <input
+              value={productSearch}
+              onChange={(e) => setProductSearch(e.target.value)}
+              placeholder="Product Name"
+              className="flex-1 text-[12.5px] outline-none bg-transparent"
+              style={{ color: C.ink }}
+            />
           </div>
 
           <div className="grid grid-cols-2 gap-2.5 overflow-y-auto pr-1 pos-scroll">
-            {products.map((p, i) => (
-              <ProductCard key={p.name} p={p} i={i} />
-            ))}
+            {productsLoading && (
+              <div className="col-span-2 flex items-center justify-center py-10" style={{ color: C.muted }}>
+                <Loader2 size={18} className="animate-spin mr-2" /> Loading products…
+              </div>
+            )}
+            {!productsLoading && productsError && (
+              <div className="col-span-2 text-center text-[12.5px] py-8" style={{ color: C.vermillion }}>
+                {productsError}
+              </div>
+            )}
+            {!productsLoading && !productsError && products.length === 0 && (
+              <div className="col-span-2 text-center text-[12.5px] py-8" style={{ color: C.muted }}>
+                কোনো প্রোডাক্ট পাওয়া যায়নি
+              </div>
+            )}
+            {!productsLoading &&
+              products.map((p, i) => <ProductCard key={p.id} p={p} i={i} onAdd={addToCart} />)}
           </div>
         </div>
 
@@ -1412,20 +1746,27 @@ export default function SellPage() {
             <span style={{ color: C.muted, fontWeight: 500 }}>
               {selectedCustomer
                 ? `|| ${selectedCustomer.phone} || ${selectedCustomer.area} || Due ৳${selectedCustomer.due}`
-                : "|| 230710646WALKING || p230710646 || none"}
+                : "|| Walk-in customer"}
             </span>
           </div>
 
           <div className="flex items-center gap-2">
             <div className="flex-1 flex items-center gap-2 rounded-lg border px-3 py-2.5" style={{ borderColor: C.line, backgroundColor: C.panel }}>
               <Barcode size={16} style={{ color: C.muted }} />
-              <input placeholder="Scan or type barcode  ·  F2" className="flex-1 text-[13px] outline-none bg-transparent" />
+              <input
+                value={barcodeInput}
+                onChange={(e) => setBarcodeInput(e.target.value)}
+                onKeyDown={handleBarcodeSubmit}
+                placeholder="Scan or type barcode, then Enter"
+                className="flex-1 text-[13px] outline-none bg-transparent"
+              />
+              {barcodeLoading && <Loader2 size={14} className="animate-spin" style={{ color: C.muted }} />}
             </div>
             <div
               className="flex items-center gap-1.5 px-3 py-2.5 rounded-lg text-white font-bold text-[13px]"
               style={{ backgroundColor: C.plum, fontFamily: FONT_MONO }}
             >
-              <ShoppingBag size={15} /> {cartItems.length}
+              <ShoppingBag size={15} /> {cart.length}
             </div>
           </div>
 
@@ -1440,16 +1781,16 @@ export default function SellPage() {
               <div />
             </div>
             <div className="overflow-y-auto flex-1 pos-scroll">
-              {cartItems.length === 0 ? (
+              {cart.length === 0 ? (
                 <div className="h-full flex items-center justify-center text-[12.5px]" style={{ color: C.muted }}>
                   কার্ট খালি — বারকোড স্ক্যান করুন অথবা পণ্যে ক্লিক করুন
                 </div>
               ) : (
-                cartItems.map((c, i) => (
+                cart.map((c, i) => (
                   <div
-                    key={c.name}
+                    key={c.id}
                     className="grid grid-cols-[1fr_120px_100px_36px] items-center px-3 py-2.5"
-                    style={i !== cartItems.length - 1 ? { borderBottom: `1px solid ${C.line}` } : undefined}
+                    style={i !== cart.length - 1 ? { borderBottom: `1px solid ${C.line}` } : undefined}
                   >
                     <div>
                       <div className="text-[13px] font-semibold">{c.name}</div>
@@ -1458,12 +1799,16 @@ export default function SellPage() {
                       </div>
                     </div>
                     <div className="flex justify-center">
-                      <Stepper value={c.qty} />
+                      <Stepper
+                        value={c.qty}
+                        onIncrement={() => incrementQty(c.id)}
+                        onDecrement={() => decrementQty(c.id)}
+                      />
                     </div>
                     <div className="text-right text-[13px] font-bold" style={{ fontFamily: FONT_MONO }}>
                       ৳{(c.unit * c.qty).toLocaleString()}
                     </div>
-                    <button className="flex justify-center" style={{ color: C.vermillion }}>
+                    <button onClick={() => removeFromCart(c.id)} className="flex justify-center" style={{ color: C.vermillion }}>
                       <X size={15} />
                     </button>
                   </div>
@@ -1605,42 +1950,51 @@ export default function SellPage() {
 
           <button
             onClick={() => setModal("cash")}
-            className="flex items-center justify-center gap-2 text-white font-bold text-[13.5px] py-3 rounded-xl shadow"
+            disabled={cart.length === 0}
+            className="flex items-center justify-center gap-2 text-white font-bold text-[13.5px] py-3 rounded-xl shadow disabled:opacity-50"
             style={{ backgroundColor: C.magenta }}
           >
             <Wallet size={16} /> CASH
           </button>
           <button
             onClick={() => setModal("card")}
-            className="flex items-center justify-center gap-2 text-white font-bold text-[13.5px] py-3 rounded-xl"
+            disabled={cart.length === 0}
+            className="flex items-center justify-center gap-2 text-white font-bold text-[13.5px] py-3 rounded-xl disabled:opacity-50"
             style={{ backgroundColor: C.plum }}
           >
             <CreditCard size={16} /> MFS or CARD
           </button>
           <button
             onClick={() => setModal("multipay")}
-            className="flex items-center justify-center gap-2 text-white font-bold text-[13.5px] py-3 rounded-xl"
+            disabled={cart.length === 0}
+            className="flex items-center justify-center gap-2 text-white font-bold text-[13.5px] py-3 rounded-xl disabled:opacity-50"
             style={{ backgroundColor: C.marigold }}
           >
             <Layers size={16} /> Multiple Pay
           </button>
 
           <button
-            onClick={() => setModal("confirm")}
-            disabled={!cashPay && !cardPay && !multiPay}
+            onClick={handleConfirmOrder}
+            disabled={(!cashPay && !cardPay && !multiPay) || saleLoading || cart.length === 0}
             className="flex items-center justify-center gap-2 font-bold text-[13.5px] py-3 rounded-xl mt-1 transition-opacity"
             style={
-              cashPay || cardPay || multiPay
+              (cashPay || cardPay || multiPay) && !saleLoading
                 ? { backgroundColor: C.forest, color: "#fff" }
                 : { backgroundColor: C.line, color: C.muted, cursor: "not-allowed" }
             }
           >
-            <CheckCircle2 size={16} /> Confirm Order
+            {saleLoading ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
+            {saleLoading ? "Saving…" : "Confirm Order"}
           </button>
         </div>
       </div>
 
-      {modal === "newCustomer" && <NewCustomerModal onClose={() => setModal(null)} />}
+      {modal === "newCustomer" && (
+        <NewCustomerModal
+          onClose={() => setModal(null)}
+          onCreated={(c) => setSelectedCustomer(c)}
+        />
+      )}
       {modal === "customer" && (
         <CustomerListModal
           onClose={() => setModal(null)}
@@ -1667,7 +2021,6 @@ export default function SellPage() {
           onApply={setMultiPay}
           payable={payable}
           current={multiPay}
-          onConfirmed={() => setModal("confirm")}
         />
       )}
       {modal === "cash" && (
@@ -1676,7 +2029,6 @@ export default function SellPage() {
           onApply={setCashPay}
           payable={payable}
           current={cashPay}
-          onConfirmed={() => setModal("confirm")}
         />
       )}
       {modal === "card" && (
@@ -1685,7 +2037,6 @@ export default function SellPage() {
           onApply={setCardPay}
           payable={payable}
           current={cardPay}
-          onConfirmed={() => setModal("confirm")}
         />
       )}
       {modal === "confirm" && (
@@ -1693,7 +2044,7 @@ export default function SellPage() {
           onClose={() => setModal(null)}
           onPrint={() => window.print()}
           customer={selectedCustomer}
-          items={cartItems}
+          items={cart}
           subtotal={subtotal}
           discount={discount}
           discountValue={discountValue}
@@ -1712,7 +2063,7 @@ export default function SellPage() {
         <ReturnModal
           onClose={() => setModal(null)}
           onApply={setReturnItems}
-          cartItems={cartItems}
+          cartItems={cart}
           current={returnItems}
         />
       )}
@@ -1721,7 +2072,7 @@ export default function SellPage() {
         invoiceNo={invoiceNo}
         time={time}
         customer={selectedCustomer}
-        items={cartItems}
+        items={cart}
         subtotal={subtotal}
         discount={discount}
         discountValue={discountValue}

@@ -18,7 +18,8 @@ export function TextField({
   label,
   required,
   placeholder,
-  defaultValue,
+  value,
+  onChange,
   type = "text",
 }) {
   return (
@@ -26,7 +27,9 @@ export function TextField({
       <FieldLabel required={required}>{label}</FieldLabel>
       <input
         type={type}
-        defaultValue={defaultValue}
+        required={required}
+        value={value}
+        onChange={onChange}
         placeholder={placeholder}
         className="w-full rounded-lg px-3.5 py-2.5 text-[13px] border outline-none transition-colors focus:ring-2"
         style={{

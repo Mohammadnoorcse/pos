@@ -7,7 +7,7 @@ import { COLORS, PETALS, FONTS } from "../../../constants";
 export function ShopSettingsPage() {
   return (
     <div
-      className="relative rounded-2xl border overflow-hidden"
+      className="relative rounded-2xl  overflow-hidden"
       style={{ backgroundColor: "transparent" }}
     >
       <div className="grid grid-cols-1 lg:grid-cols-[1.6fr_1fr] gap-5 items-start">

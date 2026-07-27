@@ -1,14 +1,18 @@
-import React from "react";
-import { Search, Download, Printer, ChevronDown } from "lucide-react";
+import React, { useState, useEffect, useCallback } from "react";
+import { Search, Download, Printer, ChevronDown, Loader2 } from "lucide-react";
 import { ScallopBorder } from "../../shared/ScallopBorder";
-import { COLORS, PETALS, FONTS, DEFAULT_STOCK_ITEMS, DEFAULT_SHOP_BRANCHES } from "../../../constants";
+import { COLORS, PETALS, FONTS } from "../../../constants";
 import { formatCurrency } from "../../../utils";
+import { fetchProductStocks } from "../../../api/productStockService";
 
-function StockFilterSelect({ value, options, accentColor = COLORS.peacock }) {
+function StockFilterSelect({ value, onChange, options, accentColor = COLORS.peacock }) {
+  
+  
   return (
     <div className="relative">
       <select
-        defaultValue={value}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
         className="appearance-none rounded-lg pl-3 pr-8 py-2 text-[12.5px] font-semibold border outline-none cursor-pointer"
         style={{
           backgroundColor: COLORS.panel,
@@ -18,8 +22,8 @@ function StockFilterSelect({ value, options, accentColor = COLORS.peacock }) {
         }}
       >
         {options.map((o) => (
-          <option key={o} value={o}>
-            {o}
+          <option key={o.id ?? o.value ?? o} value={o.id ?? o.value ?? o}>
+            {o.label ?? o.name ?? o}
           </option>
         ))}
       </select>
@@ -33,22 +37,60 @@ function StockFilterSelect({ value, options, accentColor = COLORS.peacock }) {
 }
 
 export function ProductStocksPage() {
-  const [branch, setBranch] = React.useState(DEFAULT_SHOP_BRANCHES[1]?.name || "My Business");
-  const [query, setQuery] = React.useState("");
-  const [showEntries, setShowEntries] = React.useState("100");
+  const [stocks, setStocks] = useState([]);
+  const [summary, setSummary] = useState({ total_purchase_value: 0, total_sale_value: 0 });
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
-  const filtered = DEFAULT_STOCK_ITEMS.filter((item) =>
-    (item.name + " " + (item.barcode || "")).toLowerCase().includes(query.toLowerCase())
-  );
+  // Filter States
+  const [branchId, setBranchId] = useState("");
+  const [stockType, setStockType] = useState("all"); // 'all', 'active'
+  const [categoryId, setCategoryId] = useState("");
+  const [brandId, setBrandId] = useState("");
+  const [query, setQuery] = useState("");
+  const [perPage, setPerPage] = useState("100");
 
-  const totalPP = DEFAULT_STOCK_ITEMS.reduce(
-    (sum, i) => sum + i.purchase * i.stock,
-    0
-  );
-  const totalSale = DEFAULT_STOCK_ITEMS.reduce(
-    (sum, i) => sum + i.sale * i.stock,
-    0
-  );
+  
+  const loadStocks = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      const params = {
+        branch_id: branchId || undefined,
+        search: query || undefined,
+        active_only: stockType === "active" ? true : undefined,
+        category_id: categoryId || undefined,
+        brand_id: brandId || undefined,
+        per_page: perPage,
+      };
+
+      const response = await fetchProductStocks(params);
+      
+      // Laravel Paginate Response Payload Structure
+      const stockData = response.data?.data || response.data || [];
+      setStocks(stockData);
+      console.log('product stock',stockData)
+
+      if (response.summary) {
+        setSummary(response.summary);
+      }
+    } catch (err) {
+      console.error("Error loading product stocks:", err);
+      setError("স্টক ডাটা লোড করতে সমস্যা হয়েছে। আবার চেষ্টা করুন।");
+    } finally {
+      setLoading(false);
+    }
+  }, [branchId, query, stockType, categoryId, brandId, perPage]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      loadStocks();
+    }, 300); // Search Input Debounce delay
+
+    return () => clearTimeout(timer);
+  }, [loadStocks]);
+  
 
   return (
     <div
@@ -57,7 +99,7 @@ export function ProductStocksPage() {
     >
       <ScallopBorder id="scallop-product-stocks" colors={PETALS} />
 
-      {/* HEADER: title + filters + actions */}
+      {/* HEADER: Title + Filters + Actions */}
       <div
         className="p-5 pt-7 pb-4 flex items-center justify-between flex-wrap gap-3"
         style={{ borderBottom: `1px dashed ${COLORS.line}` }}
@@ -69,50 +111,45 @@ export function ProductStocksPage() {
             color: COLORS.forestDark,
           }}
         >
-          My Business [{branch}] Current Active Stock
+          Current Active Stock Ledger
         </h2>
+
         <div className="flex items-center gap-2 flex-wrap">
+          {/* Stock Status Filter */}
           <StockFilterSelect
-            value="Active Stock"
-            options={["Active Stock", "All Stock", "Zero Stock"]}
+            value={stockType}
+            onChange={(val) => setStockType(val)}
+            options={[
+              { value: "all", label: "All Stock" },
+              { value: "active", label: "Active Stock (>0)" },
+            ]}
             accentColor={COLORS.peacock}
           />
+
+          {/* Brand Filter Placeholder */}
           <StockFilterSelect
-            value="All Brands"
-            options={["All Brands", "Aarong", "Yellow", "Ecstasy", "Sailor"]}
+            value={brandId}
+            onChange={(val) => setBrandId(val)}
+            options={[
+              { value: "", label: "All Brands" },
+            ]}
             accentColor={COLORS.marigold}
           />
+
+          {/* Category Filter Placeholder */}
           <StockFilterSelect
-            value="All Categories"
-            options={["All Categories", "Panjabi", "Shirt", "Jeans", "T-Shirt"]}
+            value={categoryId}
+            onChange={(val) => setCategoryId(val)}
+            options={[
+              { value: "", label: "All Categories" },
+            ]}
             accentColor={COLORS.rust}
           />
-          <div className="relative">
-            <select
-              value={branch}
-              onChange={(e) => setBranch(e.target.value)}
-              className="appearance-none rounded-lg pl-3 pr-8 py-2 text-[12.5px] font-semibold border outline-none cursor-pointer"
-              style={{
-                backgroundColor: COLORS.panel,
-                borderColor: COLORS.purple,
-                color: COLORS.purple,
-                fontFamily: FONTS.BODY,
-              }}
-            >
-              {DEFAULT_SHOP_BRANCHES.map((b) => (
-                <option key={b.id} value={b.name}>
-                  {b.name}
-                </option>
-              ))}
-            </select>
-            <ChevronDown
-              size={13}
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none"
-              style={{ color: COLORS.purple }}
-            />
-          </div>
+
+          {/* Print & Download Actions */}
           <button
-            className="text-white font-semibold text-[12.5px] px-3.5 py-2 rounded-lg flex items-center gap-1.5 shadow-md"
+            onClick={() => window.print()}
+            className="text-white font-semibold text-[12.5px] px-3.5 py-2 rounded-lg flex items-center gap-1.5 shadow-md hover:opacity-90 transition-opacity"
             style={{
               backgroundColor: COLORS.purple,
               boxShadow: `0 4px 10px ${COLORS.purple}40`,
@@ -121,7 +158,7 @@ export function ProductStocksPage() {
             <Printer size={13} /> Print
           </button>
           <button
-            className="text-white font-semibold text-[12.5px] px-3.5 py-2 rounded-lg flex items-center gap-1.5 shadow-md"
+            className="text-white font-semibold text-[12.5px] px-3.5 py-2 rounded-lg flex items-center gap-1.5 shadow-md hover:opacity-90 transition-opacity"
             style={{
               backgroundColor: COLORS.forest,
               boxShadow: `0 4px 10px ${COLORS.forest}40`,
@@ -132,7 +169,7 @@ export function ProductStocksPage() {
         </div>
       </div>
 
-      {/* STATS */}
+      {/* STATS SUMMARY */}
       <div
         className="px-5 py-3 flex flex-wrap gap-x-8 gap-y-1"
         style={{ borderBottom: `1px dashed ${COLORS.line}` }}
@@ -148,7 +185,7 @@ export function ProductStocksPage() {
               fontFamily: FONTS.MONO,
             }}
           >
-            ৳{formatCurrency(totalPP)}
+            ৳{formatCurrency(summary.total_purchase_value || 0)}
           </span>
         </div>
         <div className="text-[13px]">
@@ -162,7 +199,7 @@ export function ProductStocksPage() {
               fontFamily: FONTS.MONO,
             }}
           >
-            ৳{formatCurrency(totalSale)}
+            ৳{formatCurrency(summary.total_sale_value || 0)}
           </span>
         </div>
       </div>
@@ -173,8 +210,8 @@ export function ProductStocksPage() {
           Show
           <div className="relative">
             <select
-              value={showEntries}
-              onChange={(e) => setShowEntries(e.target.value)}
+              value={perPage}
+              onChange={(e) => setPerPage(e.target.value)}
               className="appearance-none rounded-lg pl-2.5 pr-6 py-1.5 text-[12.5px] font-semibold border outline-none cursor-pointer"
               style={{
                 backgroundColor: COLORS.paper,
@@ -197,6 +234,7 @@ export function ProductStocksPage() {
           </div>
           entries
         </div>
+
         <div
           className="flex items-center gap-2 rounded-lg px-3.5 py-2 text-[13px] border"
           style={{
@@ -212,134 +250,152 @@ export function ProductStocksPage() {
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            className="bg-transparent outline-none text-[13px] w-40"
+            placeholder="Name or Barcode..."
+            className="bg-transparent outline-none text-[13px] w-44"
             style={{ color: COLORS.ink, fontFamily: FONTS.BODY }}
           />
         </div>
       </div>
 
-      {/* TABLE */}
+      {/* TABLE AREA */}
       <div className="overflow-x-auto px-5 pb-6">
-        <table className="w-full text-[13px]">
-          <thead>
-            <tr className="text-left" style={{ color: COLORS.muted }}>
-              <th
-                className="font-bold text-[11px] uppercase tracking-wide pb-2.5 px-2.5 border-b"
-                style={{ borderColor: COLORS.line }}
-              >
-                Product Name
-              </th>
-              <th
-                className="font-bold text-[11px] uppercase tracking-wide pb-2.5 px-2.5 border-b"
-                style={{ borderColor: COLORS.line }}
-              >
-                Barcode
-              </th>
-              <th
-                className="font-bold text-[11px] uppercase tracking-wide pb-2.5 px-2.5 border-b text-right"
-                style={{ borderColor: COLORS.line }}
-              >
-                Purchase Price
-              </th>
-              <th
-                className="font-bold text-[11px] uppercase tracking-wide pb-2.5 px-2.5 border-b text-right"
-                style={{ borderColor: COLORS.line }}
-              >
-                Sale Price
-              </th>
-              <th
-                className="font-bold text-[11px] uppercase tracking-wide pb-2.5 px-2.5 border-b text-center"
-                style={{ borderColor: COLORS.line }}
-              >
-                Current Stock
-              </th>
-              <th
-                className="font-bold text-[11px] uppercase tracking-wide pb-2.5 px-2.5 border-b text-center"
-                style={{ borderColor: COLORS.line }}
-              >
-                Alert Qty
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map((item, i) => (
-              <tr
-                key={item.id}
-                style={
-                  i !== filtered.length - 1
-                    ? { borderBottom: `1px dashed ${COLORS.line}` }
-                    : undefined
-                }
-              >
-                <td className="py-3 px-2.5">
-                  <div className="font-semibold" style={{ color: COLORS.purple }}>
-                    {item.name}
-                    {item.variant && (
-                      <span style={{ color: COLORS.magenta }}>{item.variant}</span>
-                    )}
-                  </div>
-                  <div className="text-[11px]" style={{ color: COLORS.muted }}>
-                    Lot: {item.lot}, Discount: {item.discount}, Date: {item.date}
-                  </div>
-                </td>
-                <td className="py-3 px-2.5" style={{ color: COLORS.ink, fontFamily: FONTS.MONO }}>
-                  {item.barcode || "—"}
-                </td>
-                <td
-                  className="py-3 px-2.5 text-right font-semibold"
-                  style={{ color: COLORS.ink, fontFamily: FONTS.MONO }}
+        {loading ? (
+          <div className="flex items-center justify-center py-12 text-slate-500 gap-2">
+            <Loader2 className="animate-spin" size={20} />
+            <span>স্টক ডাটা লোড হচ্ছে...</span>
+          </div>
+        ) : error ? (
+          <div className="text-center py-8 text-red-500">{error}</div>
+        ) : (
+          <table className="w-full text-[13px]">
+            <thead>
+              <tr className="text-left" style={{ color: COLORS.muted }}>
+                <th
+                  className="font-bold text-[11px] uppercase tracking-wide pb-2.5 px-2.5 border-b"
+                  style={{ borderColor: COLORS.line }}
                 >
-                  {item.purchase}
-                </td>
-                <td
-                  className="py-3 px-2.5 text-right font-semibold"
-                  style={{ color: COLORS.ink, fontFamily: FONTS.MONO }}
+                  Product Name
+                </th>
+                <th
+                  className="font-bold text-[11px] uppercase tracking-wide pb-2.5 px-2.5 border-b"
+                  style={{ borderColor: COLORS.line }}
                 >
-                  {item.sale}
-                </td>
-                <td className="py-3 px-2.5 text-center">
-                  <span
-                    className="text-[11px] font-bold px-2.5 py-1 rounded-full"
-                    style={
-                      item.stock <= 5
-                        ? {
-                            backgroundColor: COLORS.vermillionTint,
-                            color: COLORS.vermillion,
-                          }
-                        : {
-                            backgroundColor: COLORS.forestTint,
-                            color: COLORS.forestDark,
-                          }
-                    }
+                  Barcode
+                </th>
+                <th
+                  className="font-bold text-[11px] uppercase tracking-wide pb-2.5 px-2.5 border-b text-right"
+                  style={{ borderColor: COLORS.line }}
+                >
+                  Purchase Price
+                </th>
+                <th
+                  className="font-bold text-[11px] uppercase tracking-wide pb-2.5 px-2.5 border-b text-right"
+                  style={{ borderColor: COLORS.line }}
+                >
+                  Sale Price
+                </th>
+                <th
+                  className="font-bold text-[11px] uppercase tracking-wide pb-2.5 px-2.5 border-b text-center"
+                  style={{ borderColor: COLORS.line }}
+                >
+                  Current Stock
+                </th>
+                <th
+                  className="font-bold text-[11px] uppercase tracking-wide pb-2.5 px-2.5 border-b text-center"
+                  style={{ borderColor: COLORS.line }}
+                >
+                  Alert Qty
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {stocks.length === 0 ? (
+                <tr>
+                  <td
+                    colSpan={6}
+                    className="py-8 text-center text-[13px]"
+                    style={{ color: COLORS.muted }}
                   >
-                    {item.stock}
-                  </span>
-                </td>
-                <td
-                  className="py-3 px-2.5 text-center font-semibold"
-                  style={{
-                    color:
-                      item.alert > 0 ? COLORS.rust : COLORS.muted,
-                    fontFamily: FONTS.MONO,
-                  }}
-                >
-                  {item.alert}
-                </td>
-              </tr>
-            ))}
-            {filtered.length === 0 && (
-              <tr>
-                <td
-                  colSpan={6}
-                  className="py-8 text-center text-[13px]"
-                  style={{ color: COLORS.muted }}
-                >
-                  No products match your search.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+                    কোন প্রোডাক্টের স্টক তথ্য পাওয়া যায়নি।
+                  </td>
+                </tr>
+              ) : (
+                stocks.map((item, i) => {
+                  const product = item.product || {};
+                  const variantValues = item.variant?.values?.map((v) => v.name).join(", ");
+
+                  return (
+                    <tr
+                      key={item.id}
+                      style={
+                        i !== stocks.length - 1
+                          ? { borderBottom: `1px dashed ${COLORS.line}` }
+                          : undefined
+                      }
+                    >
+                      <td className="py-3 px-2.5">
+                        <div className="font-semibold" style={{ color: COLORS.purple }}>
+                          {product.title || "N/A"}
+                          {variantValues && (
+                            <span className="ml-1 text-[12px]" style={{ color: COLORS.magenta }}>
+                              ({variantValues})
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-[11px]" style={{ color: COLORS.muted }}>
+                          {item.branch?.name && `Branch: ${item.branch.name} | `}
+                          {item.lot_no ? `Lot: ${item.lot_no}` : "No Lot"}
+                        </div>
+                      </td>
+                      <td className="py-3 px-2.5" style={{ color: COLORS.ink, fontFamily: FONTS.MONO }}>
+                        {product.barcode || "—"}
+                      </td>
+                      <td
+                        className="py-3 px-2.5 text-right font-semibold"
+                        style={{ color: COLORS.ink, fontFamily: FONTS.MONO }}
+                      >
+                        ৳{formatCurrency(product.purchase_price || 0)}
+                      </td>
+                      <td
+                        className="py-3 px-2.5 text-right font-semibold"
+                        style={{ color: COLORS.ink, fontFamily: FONTS.MONO }}
+                      >
+                        ৳{formatCurrency(product.selling_price || 0)}
+                      </td>
+                      <td className="py-3 px-2.5 text-center">
+                        <span
+                          className="text-[11px] font-bold px-2.5 py-1 rounded-full"
+                          style={
+                            item.quantity <= (product.alert_quantity || 5)
+                              ? {
+                                  backgroundColor: COLORS.vermillionTint,
+                                  color: COLORS.vermillion,
+                                }
+                              : {
+                                  backgroundColor: COLORS.forestTint,
+                                  color: COLORS.forestDark,
+                                }
+                          }
+                        >
+                          {item.quantity}
+                        </span>
+                      </td>
+                      <td
+                        className="py-3 px-2.5 text-center font-semibold"
+                        style={{
+                          color: (product.alert_quantity || 0) > 0 ? COLORS.rust : COLORS.muted,
+                          fontFamily: FONTS.MONO,
+                        }}
+                      >
+                        {product.alert_quantity || 0}
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        )}
       </div>
     </div>
   );

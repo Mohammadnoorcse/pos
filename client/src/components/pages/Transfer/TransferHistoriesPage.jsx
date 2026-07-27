@@ -1,19 +1,84 @@
 import React from "react";
-import { Search, ChevronDown, ArrowRightLeft } from "lucide-react";
+import { Search, ChevronDown, ArrowRightLeft, Loader2 } from "lucide-react";
 import { ScallopBorder } from "../../shared/ScallopBorder";
 import { COLORS, PETALS, FONTS } from "../../../constants";
+import { fetchStockTransfers } from "../../../api/stockTransferService";
 
-export function TransferHistoriesPage({ history }) {
+function useDebouncedValue(value, delay = 400) {
+  const [debounced, setDebounced] = React.useState(value);
+  React.useEffect(() => {
+    const t = setTimeout(() => setDebounced(value), delay);
+    return () => clearTimeout(t);
+  }, [value, delay]);
+  return debounced;
+}
+
+// The type filter shown in the UI uses "B2B/B2G" for display, but the API
+// (and DB enum) stores it as "B2B_B2G". Keep the mapping in one place.
+const TYPE_UI_TO_API = { "B2B/B2G": "B2B_B2G", G2B: "G2B" };
+const TYPE_API_TO_UI = { B2B_B2G: "B2B/B2G", G2B: "G2B" };
+
+function normalizeTransfer(r) {
+  return {
+    id: r.id,
+    type: TYPE_API_TO_UI[r.type] ?? r.type,
+    from: r.from_branch?.name ?? r.fromBranch?.name ?? "N/A",
+    to: r.to_branch?.name ?? r.toBranch?.name ?? "N/A",
+    date: r.transfer_date ?? r.date ?? "",
+    note: r.note ?? "",
+    items: (r.items ?? []).map((it) => ({
+      name: it.product?.title ?? it.product?.name ?? "Unnamed",
+      qty: Number(it.quantity ?? 0),
+      unitLabel: it.product?.unit ?? "pcs",
+    })),
+    total: Number(r.total ?? 0),
+  };
+}
+
+function extractList(res) {
+  if (Array.isArray(res)) return res;
+  if (Array.isArray(res?.data)) return res.data;
+  if (Array.isArray(res?.data?.data)) return res.data.data;
+  return [];
+}
+
+export function TransferHistoriesPage({ refreshKey }) {
   const [query, setQuery] = React.useState("");
+  const debouncedQuery = useDebouncedValue(query, 350);
   const [typeFilter, setTypeFilter] = React.useState("All");
 
-  const filtered = history.filter((r) => {
-    const matchesType = typeFilter === "All" || r.type === typeFilter;
-    const matchesQuery = (r.from + " " + r.to + " " + r.note)
-      .toLowerCase()
-      .includes(query.toLowerCase());
-    return matchesType && matchesQuery;
-  });
+  const [history, setHistory] = React.useState([]);
+  const [loading, setLoading] = React.useState(false);
+  const [error, setError] = React.useState(null);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+
+    const params = {};
+    if (typeFilter !== "All") params.type = TYPE_UI_TO_API[typeFilter];
+    if (debouncedQuery) params.search = debouncedQuery;
+
+    fetchStockTransfers(params)
+      .then((res) => {
+        if (cancelled) return;
+        setHistory(extractList(res).map(normalizeTransfer));
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setError(err.message || "ইতিহাস লোড করা যায়নি");
+        setHistory([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+    // refreshKey lets a parent force a re-fetch right after a new transfer is confirmed
+  }, [typeFilter, debouncedQuery, refreshKey]);
 
   return (
     <div
@@ -36,6 +101,7 @@ export function TransferHistoriesPage({ history }) {
           >
             {history.length} total
           </span>
+          {loading && <Loader2 size={14} className="animate-spin" style={{ color: COLORS.muted }} />}
         </h2>
         <div className="flex items-center gap-2.5 flex-wrap">
           <div className="relative">
@@ -82,6 +148,15 @@ export function TransferHistoriesPage({ history }) {
         </div>
       </div>
 
+      {error && (
+        <div
+          className="rounded-lg px-3.5 py-2.5 text-[12.5px] font-semibold mb-4"
+          style={{ backgroundColor: COLORS.vermillionTint, color: COLORS.vermillion }}
+        >
+          {error}
+        </div>
+      )}
+
       <div className="overflow-x-auto">
         <table className="w-full text-[13px]">
           <thead>
@@ -125,7 +200,7 @@ export function TransferHistoriesPage({ history }) {
             </tr>
           </thead>
           <tbody>
-            {filtered.map((r, i) => {
+            {history.map((r, i) => {
               const isG2B = r.type === "G2B";
               const accent = isG2B ? COLORS.peacock : COLORS.purple;
               const accentTint = isG2B ? COLORS.peacockTint : COLORS.purpleTint;
@@ -133,7 +208,7 @@ export function TransferHistoriesPage({ history }) {
                 <tr
                   key={r.id}
                   style={
-                    i !== filtered.length - 1
+                    i !== history.length - 1
                       ? { borderBottom: `1px solid ${COLORS.line}` }
                       : undefined
                   }
@@ -190,16 +265,14 @@ export function TransferHistoriesPage({ history }) {
                 </tr>
               );
             })}
-            {filtered.length === 0 && (
+            {!loading && history.length === 0 && (
               <tr>
                 <td
                   colSpan={6}
                   className="py-10 text-center text-[13px]"
                   style={{ color: COLORS.muted }}
                 >
-                  {history.length === 0
-                    ? "No stock transfers yet. Create one from Product Transfer."
-                    : "No transfers match your search."}
+                  No stock transfers yet. Create one from Product Transfer.
                 </td>
               </tr>
             )}

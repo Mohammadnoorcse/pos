@@ -10,9 +10,14 @@ import {
   Warehouse,
   Receipt,
   Home,
+  UserPlus,
+  LogOut,
 } from "lucide-react";
 import { useClock } from "../../hooks";
 import { COLORS, FONTS } from "../../constants";
+import { RegisterForm } from "../../AuthPages";
+
+const API_BASE = import.meta.env.VITE_API_URL;
 
 const wingItems = [
   { id: "supplier", label: "Supplier Wing", icon: Users, tint: true },
@@ -92,13 +97,105 @@ function WingsModal({ open, onClose, onSelect }) {
   );
 }
 
-/* onWingSelect  -> opens the "Others Wings" picker modal (Supplier / Godowns / Acc / Main)
-   onSellClick   -> navigates straight to the Sell (POS) page, no modal
-   These were previously collapsed into the same handler on 3 near-duplicate
-   buttons; split apart so SELL actually routes to the sell screen. */
-export function Topbar({ onWingSelect, onSellClick }) {
+function RegisterModal({ open, onClose }) {
+  if (!open) return null;
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 px-4 pt-16 overflow-y-auto"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-md rounded-lg bg-stone-950 border border-stone-800 shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-5 py-3 border-b border-stone-800">
+          <h2 className="text-sm font-semibold text-stone-100">Register New User</h2>
+          <button onClick={onClose} className="text-stone-500 hover:text-stone-200">
+            <X size={16} />
+          </button>
+        </div>
+        <RegisterForm onSuccess={onClose} />
+      </div>
+    </div>
+  );
+}
+
+function UserMenu({ user, initials, onLogout }) {
+  const [open, setOpen] = useState(false);
+
+  const handleLogout = async () => {
+    setOpen(false);
+    const token = localStorage.getItem("token");
+    try {
+      if (token) {
+        await fetch(`${API_BASE}/auth/logout`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            Accept: "application/json",
+          },
+        });
+      }
+    } catch (err) {
+      console.error("Logout request failed:", err);
+    } finally {
+      onLogout && onLogout();
+    }
+  };
+
+  return (
+    <div className="relative hidden lg:block">
+      <div
+        onClick={() => setOpen((o) => !o)}
+        className="flex items-center gap-2 pl-1.5 pr-3 py-1.5 border rounded-lg text-[13px] font-semibold cursor-pointer"
+        style={{ borderColor: COLORS.line }}
+      >
+        <div
+          className="w-7 h-7 rounded-lg text-white flex items-center justify-center text-[11px] font-bold"
+          style={{ background: `linear-gradient(135deg, ${COLORS.purple}, ${COLORS.magenta})` }}
+        >
+          {initials}
+        </div>
+        {user?.name || "Guest"} <ChevronDown size={13} />
+      </div>
+
+      {open && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div
+            className="absolute right-0 top-full mt-2 w-44 rounded-lg border shadow-lg z-50 overflow-hidden"
+            style={{ backgroundColor: COLORS.panel, borderColor: COLORS.line }}
+          >
+            <div className="px-3.5 py-2.5 border-b" style={{ borderColor: COLORS.line }}>
+              <p className="text-[12.5px] font-semibold" style={{ color: COLORS.ink }}>
+                {user?.name}
+              </p>
+              <p className="text-[11px] capitalize" style={{ color: COLORS.muted }}>
+                {user?.user_type}
+              </p>
+            </div>
+            <button
+              onClick={handleLogout}
+              className="w-full flex items-center gap-2 px-3.5 py-2.5 text-[12.5px] font-medium text-red-500 hover:bg-red-500/10"
+            >
+              <LogOut size={14} /> Logout
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+export function Topbar({ onWingSelect, onSellClick, user, onLogout }) {
   const clock = useClock();
   const [wingsOpen, setWingsOpen] = useState(false);
+  const [registerOpen, setRegisterOpen] = useState(false);
+
+  const canRegister = user?.user_type === "owner" || user?.user_type === "admin";
+  const initials = user?.name
+    ? user.name.split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase()
+    : "?";
 
   return (
     <div
@@ -162,7 +259,16 @@ export function Topbar({ onWingSelect, onSellClick }) {
           <MessageCircle size={15} />
         </button>
 
-        {/* Opens the wings picker modal */}
+        {canRegister && (
+          <button
+            onClick={() => setRegisterOpen(true)}
+            className="text-white font-semibold text-[13px] px-4 py-2.5 rounded-lg flex items-center gap-1.5 shadow-md"
+            style={{ backgroundColor: "#2E7D32", boxShadow: "0 4px 10px #2E7D3240" }}
+          >
+            <UserPlus size={14} /> Register
+          </button>
+        )}
+
         <button
           onClick={() => setWingsOpen(true)}
           className="text-white font-semibold text-[13px] px-4 py-2.5 rounded-lg flex items-center gap-1.5 shadow-md"
@@ -174,7 +280,6 @@ export function Topbar({ onWingSelect, onSellClick }) {
           <ShoppingCart size={14} /> Wing
         </button>
 
-        {/* Goes straight to the Sell page — no modal */}
         <button
           onClick={() => onSellClick && onSellClick()}
           className="text-white font-semibold text-[13px] px-4 py-2.5 rounded-lg flex items-center gap-1.5 shadow-md"
@@ -186,20 +291,7 @@ export function Topbar({ onWingSelect, onSellClick }) {
           <ShoppingCart size={14} /> SELL
         </button>
 
-        <div
-          className="hidden lg:flex items-center gap-2 pl-1.5 pr-3 py-1.5 border rounded-lg text-[13px] font-semibold cursor-pointer"
-          style={{ borderColor: COLORS.line }}
-        >
-          <div
-            className="w-7 h-7 rounded-lg text-white flex items-center justify-center text-[11px] font-bold"
-            style={{
-              background: `linear-gradient(135deg, ${COLORS.purple}, ${COLORS.magenta})`,
-            }}
-          >
-            SM
-          </div>
-          SOHAG AHMED MOON <ChevronDown size={13} />
-        </div>
+        <UserMenu user={user} initials={initials} onLogout={onLogout} />
       </div>
 
       <WingsModal
@@ -209,6 +301,7 @@ export function Topbar({ onWingSelect, onSellClick }) {
           onWingSelect && onWingSelect(id === "main" ? null : id);
         }}
       />
+      <RegisterModal open={registerOpen} onClose={() => setRegisterOpen(false)} />
     </div>
   );
 }
