@@ -29,8 +29,10 @@ import {
   CheckCircle2,
   RotateCcw,
   Loader2,
+  ScanLine,
 } from "lucide-react";
 import ReturnModal from "./ReturnModal";
+import QRScannerModal from "./QRScannerModal";
 
 import { fetchProducts } from "../../../api/productService";
 import { fetchCategories } from "../../../api/categoryService";
@@ -1760,6 +1762,8 @@ export default function SellPage() {
 
   const [barcodeInput, setBarcodeInput] = React.useState("");
   const [barcodeLoading, setBarcodeLoading] = React.useState(false);
+  const [scannerOpen, setScannerOpen] = React.useState(false);
+  const barcodeInputRef = React.useRef(null);
 
   // -- Cart / sale state --------------------------------------------------
   const [cart, setCart] = React.useState([]);
@@ -1863,14 +1867,14 @@ export default function SellPage() {
   /**
    * Barcode Search & Direct Add-to-Cart Logic
    */
-  const handleBarcodeSubmit = async (e) => {
-    if (e.key !== "Enter" || !barcodeInput.trim()) return;
-    const term = barcodeInput.trim();
+  const lookupAndAddByCode = async (rawTerm) => {
+    const term = (rawTerm || "").trim();
+    if (!term) return;
+
     setBarcodeLoading(true);
     setSaleError(null);
 
     try {
-      // 1. Search locally in already loaded products
       const localMatch = products.find(
         (p) => p.barcode && p.barcode.toString().toLowerCase() === term.toLowerCase()
       );
@@ -1878,34 +1882,42 @@ export default function SellPage() {
       if (localMatch) {
         addToCart(localMatch);
         setBarcodeInput("");
-        setBarcodeLoading(false);
         return;
       }
 
-      // 2. Fetch from Backend API
-      const res = await fetchProducts({
-        search: term,
-        barcode: term,
-        per_page: 1,
-      });
-
+      const res = await fetchProducts({ search: term, per_page: 20 });
       const items = extractList(res).map(normalizeProduct);
+
       const found = items.find(
         (p) => p.barcode && p.barcode.toString().toLowerCase() === term.toLowerCase()
-      ) || items[0];
+      );
 
       if (found) {
         addToCart(found);
         setBarcodeInput("");
       } else {
-        setSaleError(`বারকোড "${term}" দিয়ে কোনো পণ্য পাওয়া যায়নি`);
+        setSaleError(`\u09ac\u09be\u09b0\u0995\u09cb\u09a1/\u0995\u09cb\u09a1 "${term}" \u09a6\u09bf\u09df\u09c7 \u0995\u09cb\u09a8\u09cb \u09aa\u09a3\u09cd\u09af \u09aa\u09be\u0993\u09df\u09be \u09af\u09be\u09df\u09a8\u09bf`);
       }
     } catch (err) {
-      setSaleError(err.message || "বারকোড খুঁজে পাওয়া যায়নি");
+      setSaleError(err.message || "\u09ac\u09be\u09b0\u0995\u09cb\u09a1 \u0996\u09c1\u0981\u099c\u09c7 \u09aa\u09be\u0993\u09df\u09be \u09af\u09be\u09df\u09a8\u09bf");
     } finally {
       setBarcodeLoading(false);
+      barcodeInputRef.current?.focus();
     }
   };
+
+  const handleBarcodeSubmit = (e) => {
+    if (e.key !== "Enter" || !barcodeInput.trim()) return;
+    lookupAndAddByCode(barcodeInput);
+  };
+
+  const handleQrDetect = React.useCallback(
+    (value) => {
+      lookupAndAddByCode(value);
+      setScannerOpen(false);
+    },
+    [products]
+  );
 
   const subtotal = cart.reduce((s, i) => s + i.unit * i.qty, 0);
   const preDue = selectedCustomer?.due ?? 0;
@@ -2241,11 +2253,13 @@ export default function SellPage() {
             >
               <Barcode size={16} style={{ color: C.muted }} />
               <input
+                ref={barcodeInputRef}
                 value={barcodeInput}
                 onChange={(e) => setBarcodeInput(e.target.value)}
                 onKeyDown={handleBarcodeSubmit}
                 placeholder="Scan or enter Barcode, then press Enter"
                 className="flex-1 text-[13px] outline-none bg-transparent"
+                style={{ minHeight: 22 }}
               />
               {barcodeLoading && (
                 <Loader2
@@ -2255,13 +2269,34 @@ export default function SellPage() {
                 />
               )}
             </div>
+            <button
+              type="button"
+              onClick={() => setScannerOpen(true)}
+              className="flex items-center gap-1.5 px-3.5 rounded-lg font-bold text-[13px] active:scale-95 transition"
+              style={{
+                backgroundColor: C.panel,
+                color: C.plum,
+                border: `1px solid ${C.line}`,
+                minWidth: 44,
+                minHeight: 44,
+              }}
+              title="ক্যামেরা দিয়ে QR/বারকোড স্ক্যান করুন"
+            >
+              <ScanLine size={16} />
+            </button>
             <div
               className="flex items-center gap-1.5 px-3 py-2.5 rounded-lg text-white font-bold text-[13px]"
-              style={{ backgroundColor: C.plum, fontFamily: FONT_MONO }}
+              style={{ backgroundColor: C.plum, fontFamily: FONT_MONO, minHeight: 44 }}
             >
               <ShoppingBag size={15} /> {cart.length}
             </div>
           </div>
+
+          <QRScannerModal
+            open={scannerOpen}
+            onClose={() => setScannerOpen(false)}
+            onDetect={handleQrDetect}
+          />
 
           <div
             className="flex-1 rounded-xl border overflow-hidden flex flex-col min-h-0"
