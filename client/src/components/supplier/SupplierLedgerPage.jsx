@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import {
   Search,
   ChevronLeft,
@@ -10,52 +10,25 @@ import {
   Phone,
   MapPin,
   Wallet,
-  TrendingUp,
-  TrendingDown,
   ArrowDownCircle,
   ArrowUpCircle,
   Undo2,
+  Loader2,
+  AlertCircle,
+  RefreshCw,
 } from "lucide-react";
 import { COLORS, FONTS } from "../../constants";
 
-// Same design tokens used across PurchasePage.jsx / SupplierPaymentPage.jsx / ProductReturnPage.jsx
+// Import your API methods (adjust path to match your folder structure)
+import { fetchSuppliers } from "../../api/supplier/supplierService";
+import { fetchPurchases } from "../../api/supplier/purchaseService";
+import { fetchSupplierPayments } from "../../api/supplier/supplierPaymentService";
+import { fetchPurchaseReturns } from "../../api/supplier/purchaseReturnService";
+
 const vermillionSoft = `${COLORS.vermillionSoft || COLORS.vermillion + "1A"}`;
 const magentaSoft = COLORS.magentaSoft || `${COLORS.magenta}1A`;
 const greenSoft = "#E7F6EC";
 const green = "#1E9E5A";
-
-const SUPPLIERS = [
-  { id: 1, name: "Matador", company: "Matador BD", phone: "01784848944", address: "Mirpur-10, Dhaka" },
-  { id: 2, name: "Siraj", company: "Siraj Enterprise", phone: "01717777744", address: "Chawkbazar, Chattogram" },
-  { id: 3, name: "Sohag Ahmed", company: "Cock", phone: "01766554433", address: "Bogura Sadar, Bogura" },
-  { id: 4, name: "nazrul", company: "Allahr Dan 4", phone: "01655221199", address: "Feni Sadar, Feni" },
-];
-
-// Mock combined transaction feed per supplier: purchase (debit / increases payable),
-// payment (credit / reduces payable), return (credit / reduces payable)
-const LEDGER_ENTRIES = {
-  1: [
-    { id: "PUR-8801", date: "01-04-2025", type: "purchase", ref: "STB/230710646/98", note: "Napa 500mg + Seclo 20mg", debit: 8600, credit: 0 },
-    { id: "PAY-5510", date: "05-04-2025", type: "payment", ref: "CHK-1123", note: "Partial payment", debit: 0, credit: 4000 },
-    { id: "RTN-3041", date: "19-04-2025", type: "return", ref: "STB/230710646/98", note: "Damaged — Napa 500mg", debit: 0, credit: 600 },
-    { id: "PUR-8814", date: "22-04-2025", type: "purchase", ref: "STB/230710701/12", note: "Restock antibiotics", debit: 5200, credit: 0 },
-    { id: "PAY-5522", date: "28-04-2025", type: "payment", ref: "CASH-991", note: "Cash settlement", debit: 0, credit: 3000 },
-  ],
-  2: [
-    { id: "PUR-8790", date: "28-03-2025", type: "purchase", ref: "STB/230710646/97", note: "7up Can (24pcs) x15", debit: 12750, credit: 0 },
-    { id: "RTN-3037", date: "13-04-2025", type: "return", ref: "STB/230710646/97", note: "Excess stock", debit: 0, credit: 2550 },
-    { id: "PAY-5501", date: "15-04-2025", type: "payment", ref: "BKASH-7781", note: "Mobile banking", debit: 0, credit: 5000 },
-  ],
-  3: [
-    { id: "PUR-8770", date: "20-03-2025", type: "purchase", ref: "STB/230710646/93", note: "Cock Detergent 1kg x30", debit: 5400, credit: 0 },
-    { id: "RTN-3029", date: "04-04-2025", type: "return", ref: "STB/230710646/93", note: "Expired batch", debit: 0, credit: 1440 },
-    { id: "PAY-5490", date: "10-04-2025", type: "payment", ref: "CHK-1098", note: "Full settlement", debit: 0, credit: 3960 },
-  ],
-  4: [
-    { id: "PUR-8750", date: "15-03-2025", type: "purchase", ref: "STB/230710646/94", note: "Chanachur 200g x100", debit: 4000, credit: 0 },
-    { id: "PAY-5470", date: "22-03-2025", type: "payment", ref: "CASH-870", note: "Advance payment", debit: 0, credit: 2000 },
-  ],
-};
 
 const TYPE_META = {
   purchase: { label: "Purchase", color: COLORS.vermillion || "#C4442E", soft: vermillionSoft, Icon: ArrowDownCircle },
@@ -63,15 +36,20 @@ const TYPE_META = {
   return: { label: "Return", color: "#B8790A", soft: "#FFF4E0", Icon: Undo2 },
 };
 
-function withRunningBalance(entries) {
+function calculateRunningBalance(entries) {
+  // Sort chronologically ascending
+  const sorted = [...entries].sort((a, b) => {
+    const dateA = new Date(a.date || 0).getTime();
+    const dateB = new Date(b.date || 0).getTime();
+    if (dateA !== dateB) return dateA - dateB;
+    return a.id.localeCompare(b.id);
+  });
+
   let balance = 0;
-  return entries
-    .slice()
-    .sort((a, b) => a.date.split("-").reverse().join("").localeCompare(b.date.split("-").reverse().join("")))
-    .map((e) => {
-      balance += e.debit - e.credit;
-      return { ...e, balance };
-    });
+  return sorted.map((e) => {
+    balance += (e.debit - e.credit);
+    return { ...e, balance };
+  });
 }
 
 function StatCard({ icon: Icon, label, value, color, soft }) {
@@ -106,7 +84,7 @@ function SupplierPickerCard({ supplier, active, onClick }) {
         {supplier.name}
       </div>
       <div className="text-[11px] mt-0.5" style={{ color: COLORS.muted }}>
-        {supplier.company}
+        {supplier.company_name || supplier.company || "—"}
       </div>
     </button>
   );
@@ -146,7 +124,7 @@ function LedgerDetailModal({ entry, supplier, onClose }) {
           <div className="flex items-start justify-between pb-4 mb-4 border-b" style={{ borderColor: COLORS.line }}>
             <div>
               <div className="text-[20px] font-bold" style={{ color: COLORS.ink }}>{supplier?.name}</div>
-              <div className="text-[12.5px] mt-0.5" style={{ color: COLORS.muted }}>{supplier?.company}</div>
+              <div className="text-[12.5px] mt-0.5" style={{ color: COLORS.muted }}>{supplier?.company_name || supplier?.company}</div>
               <div className="text-[12px] mt-1.5" style={{ color: meta.color, fontFamily: FONTS.MONO }}>{entry.id}</div>
             </div>
             <div className="text-right">
@@ -167,7 +145,7 @@ function LedgerDetailModal({ entry, supplier, onClose }) {
             </div>
             <div>
               <div className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: COLORS.muted }}>Note</div>
-              <div className="text-[13px] font-semibold mt-0.5" style={{ color: COLORS.ink }}>{entry.note}</div>
+              <div className="text-[13px] font-semibold mt-0.5" style={{ color: COLORS.ink }}>{entry.note || "—"}</div>
             </div>
           </div>
 
@@ -223,48 +201,188 @@ function LedgerDetailModal({ entry, supplier, onClose }) {
 }
 
 export function SupplierLedgerPage() {
-  const [supplierId, setSupplierId] = React.useState(SUPPLIERS[0].id);
-  const [query, setQuery] = React.useState("");
-  const [perPage, setPerPage] = React.useState(100);
-  const [selectedEntry, setSelectedEntry] = React.useState(null);
+  const [suppliers, setSuppliers] = useState([]);
+  const [supplierId, setSupplierId] = useState(null);
+  const [loadingSuppliers, setLoadingSuppliers] = useState(true);
+  const [loadingLedger, setLoadingLedger] = useState(false);
+  const [error, setError] = useState(null);
 
-  const supplier = SUPPLIERS.find((s) => s.id === supplierId);
-  const rawEntries = LEDGER_ENTRIES[supplierId] || [];
-  const entries = withRunningBalance(rawEntries);
+  const [rawEntries, setRawEntries] = useState([]);
+  const [query, setQuery] = useState("");
+  const [perPage, setPerPage] = useState(25);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [selectedEntry, setSelectedEntry] = useState(null);
 
-  const filtered = entries.filter((e) =>
-    [e.id, e.ref, e.note, TYPE_META[e.type].label].join(" ").toLowerCase().includes(query.toLowerCase())
-  );
+  // 1. Fetch Suppliers List
+  const loadSuppliers = async () => {
+    setLoadingSuppliers(true);
+    setError(null);
+    try {
+      const response = await fetchSuppliers({ per_page: 100 });
+      const supplierList = Array.isArray(response) ? response : response?.data || [];
+      setSuppliers(supplierList);
 
-  const totalPurchase = entries.reduce((s, e) => s + (e.type === "purchase" ? e.debit : 0), 0);
-  const totalPayment = entries.reduce((s, e) => s + (e.type === "payment" ? e.credit : 0), 0);
-  const totalReturn = entries.reduce((s, e) => s + (e.type === "return" ? e.credit : 0), 0);
-  const closingBalance = entries.length ? entries[entries.length - 1].balance : 0;
+      if (supplierList.length > 0) {
+        setSupplierId(supplierList[0].id);
+      }
+    } catch (err) {
+      setError(err.message || "Failed to load suppliers.");
+    } finally {
+      setLoadingSuppliers(false);
+    }
+  };
+
+  useEffect(() => {
+    loadSuppliers();
+  }, []);
+
+  // 2. Fetch Ledger Records whenever Selected Supplier Changes
+  const loadLedgerData = async () => {
+    if (!supplierId) return;
+    setLoadingLedger(true);
+    setError(null);
+
+    try {
+      const [purchasesRes, paymentsRes, returnsRes] = await Promise.all([
+        fetchPurchases({ supplier_id: supplierId, per_page: 500 }),
+        fetchSupplierPayments({ supplier_id: supplierId, per_page: 500 }),
+        fetchPurchaseReturns({ supplier_id: supplierId, per_page: 500 }),
+      ]);
+
+      const purchases = purchasesRes?.data || (Array.isArray(purchasesRes) ? purchasesRes : []);
+      const payments = paymentsRes?.data || (Array.isArray(paymentsRes) ? paymentsRes : []);
+      const returns = returnsRes?.data || (Array.isArray(returnsRes) ? returnsRes : []);
+
+      // Normalize into unified transactions
+      const normalizedPurchases = purchases.map((p) => ({
+        id: `PUR-${p.id}`,
+        rawId: p.id,
+        date: p.purchase_date || p.date || p.created_at?.split("T")[0] || "",
+        type: "purchase",
+        ref: p.reference_no || p.invoice_no || p.ref || `PUR-${p.id}`,
+        note: p.note || p.remarks || "Purchase record",
+        debit: Number(p.grand_total || p.total_amount || p.total || 0),
+        credit: 0,
+      }));
+
+      const normalizedPayments = payments.map((p) => ({
+        id: `PAY-${p.id}`,
+        rawId: p.id,
+        date: p.paid_date || p.payment_date || p.date || p.created_at?.split("T")[0] || "",
+        type: "payment",
+        ref: p.method || p.payment_method || p.reference_no || `PAY-${p.id}`,
+        note: p.note || p.remarks || "Supplier payment",
+        debit: 0,
+        credit: Number(p.amount || 0),
+      }));
+
+      const normalizedReturns = returns.map((r) => ({
+        id: `RTN-${r.id}`,
+        rawId: r.id,
+        date: r.return_date || r.date || r.created_at?.split("T")[0] || "",
+        type: "return",
+        ref: r.reference_no || r.ref || `RTN-${r.id}`,
+        note: r.reason || r.note || "Product return",
+        debit: 0,
+        credit: Number(r.total_amount || r.amount || 0),
+      }));
+
+      setRawEntries([...normalizedPurchases, ...normalizedPayments, ...normalizedReturns]);
+    } catch (err) {
+      setError(err.message || "Failed to load ledger transactions.");
+    } finally {
+      setLoadingLedger(false);
+    }
+  };
+
+  useEffect(() => {
+    loadLedgerData();
+    setCurrentPage(1);
+  }, [supplierId]);
+
+  const activeSupplier = suppliers.find((s) => s.id === supplierId);
+  const processedEntries = useMemo(() => calculateRunningBalance(rawEntries), [rawEntries]);
+
+  // Client-side Search Filtering
+  const filtered = useMemo(() => {
+    return processedEntries.filter((e) =>
+      [e.id, e.ref, e.note, TYPE_META[e.type]?.label || ""]
+        .join(" ")
+        .toLowerCase()
+        .includes(query.toLowerCase())
+    );
+  }, [processedEntries, query]);
+
+  // Summaries
+  const totalPurchase = processedEntries.reduce((s, e) => s + (e.type === "purchase" ? e.debit : 0), 0);
+  const totalPayment = processedEntries.reduce((s, e) => s + (e.type === "payment" ? e.credit : 0), 0);
+  const totalReturn = processedEntries.reduce((s, e) => s + (e.type === "return" ? e.credit : 0), 0);
+  const closingBalance = processedEntries.length ? processedEntries[processedEntries.length - 1].balance : 0;
+
+  // Pagination Math
+  const totalPages = Math.ceil(filtered.length / perPage) || 1;
+  const paginatedEntries = useMemo(() => {
+    const start = (currentPage - 1) * perPage;
+    return filtered.slice(start, start + perPage);
+  }, [filtered, currentPage, perPage]);
+
+  if (loadingSuppliers) {
+    return (
+      <div className="p-12 flex flex-col items-center justify-center min-h-[400px]" style={{ color: COLORS.muted }}>
+        <Loader2 className="animate-spin mb-3" size={32} />
+        <span className="text-[14px]">Loading suppliers...</span>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6" style={{ backgroundColor: COLORS.paper, fontFamily: FONTS.BODY, minHeight: "100%" }}>
-      {/* Supplier picker */}
+      {/* Error Banner */}
+      {error && (
+        <div className="mb-4 p-4 rounded-xl flex items-center justify-between border" style={{ backgroundColor: vermillionSoft, borderColor: COLORS.vermillion, color: COLORS.vermillion }}>
+          <div className="flex items-center gap-2">
+            <AlertCircle size={18} />
+            <span className="text-[13px] font-semibold">{error}</span>
+          </div>
+          <button onClick={loadLedgerData} className="flex items-center gap-1.5 text-[12px] font-semibold underline">
+            <RefreshCw size={13} /> Retry
+          </button>
+        </div>
+      )}
+
+      {/* Supplier Picker */}
       <div className="flex items-center gap-2.5 mb-4 overflow-x-auto pb-1">
-        {SUPPLIERS.map((s) => (
+        {suppliers.map((s) => (
           <SupplierPickerCard key={s.id} supplier={s} active={s.id === supplierId} onClick={() => setSupplierId(s.id)} />
         ))}
+        {suppliers.length === 0 && (
+          <div className="text-[13px]" style={{ color: COLORS.muted }}>No suppliers found.</div>
+        )}
       </div>
 
       {/* Supplier info strip */}
-      <div className="rounded-2xl border p-4 mb-4 flex flex-wrap items-center gap-x-6 gap-y-2" style={{ backgroundColor: COLORS.panel, borderColor: COLORS.line }}>
-        <div className="flex items-center gap-2">
-          <Building2 size={14} style={{ color: COLORS.muted }} />
-          <span className="text-[13px] font-semibold" style={{ color: COLORS.ink }}>{supplier.company}</span>
+      {activeSupplier && (
+        <div className="rounded-2xl border p-4 mb-4 flex flex-wrap items-center gap-x-6 gap-y-2" style={{ backgroundColor: COLORS.panel, borderColor: COLORS.line }}>
+          <div className="flex items-center gap-2">
+            <Building2 size={14} style={{ color: COLORS.muted }} />
+            <span className="text-[13px] font-semibold" style={{ color: COLORS.ink }}>
+              {activeSupplier.company_name || activeSupplier.company || activeSupplier.name}
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Phone size={14} style={{ color: COLORS.muted }} />
+            <span className="text-[13px]" style={{ color: COLORS.ink, fontFamily: FONTS.MONO }}>
+              {activeSupplier.phone || activeSupplier.mobile || "N/A"}
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <MapPin size={14} style={{ color: COLORS.muted }} />
+            <span className="text-[13px]" style={{ color: COLORS.ink }}>
+              {activeSupplier.address || "N/A"}
+            </span>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          <Phone size={14} style={{ color: COLORS.muted }} />
-          <span className="text-[13px]" style={{ color: COLORS.ink, fontFamily: FONTS.MONO }}>{supplier.phone}</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <MapPin size={14} style={{ color: COLORS.muted }} />
-          <span className="text-[13px]" style={{ color: COLORS.ink }}>{supplier.address}</span>
-        </div>
-      </div>
+      )}
 
       {/* Summary cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
@@ -307,7 +425,10 @@ export function SupplierLedgerPage() {
               <span>Show</span>
               <select
                 value={perPage}
-                onChange={(e) => setPerPage(Number(e.target.value))}
+                onChange={(e) => {
+                  setPerPage(Number(e.target.value));
+                  setCurrentPage(1);
+                }}
                 className="rounded-md px-2 py-1.5 border text-[13px] outline-none"
                 style={{ borderColor: COLORS.line, color: COLORS.ink, backgroundColor: COLORS.paper }}
               >
@@ -322,7 +443,10 @@ export function SupplierLedgerPage() {
               <Search size={14} style={{ color: COLORS.muted }} />
               <input
                 value={query}
-                onChange={(e) => setQuery(e.target.value)}
+                onChange={(e) => {
+                  setQuery(e.target.value);
+                  setCurrentPage(1);
+                }}
                 placeholder="Search entry id / reference / note / type"
                 className="bg-transparent outline-none text-[13px] w-full"
                 style={{ color: COLORS.ink }}
@@ -332,7 +456,13 @@ export function SupplierLedgerPage() {
         </div>
 
         {/* Table */}
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto min-h-[250px] relative">
+          {loadingLedger && (
+            <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/60 backdrop-blur-[1px]">
+              <Loader2 className="animate-spin" size={28} style={{ color: COLORS.vermillion }} />
+            </div>
+          )}
+
           <table className="w-full text-[13px] border-collapse">
             <thead>
               <tr>
@@ -344,8 +474,8 @@ export function SupplierLedgerPage() {
               </tr>
             </thead>
             <tbody>
-              {filtered.slice(0, perPage).map((row) => {
-                const meta = TYPE_META[row.type];
+              {paginatedEntries.map((row) => {
+                const meta = TYPE_META[row.type] || TYPE_META.purchase;
                 return (
                   <tr
                     key={row.id}
@@ -386,14 +516,16 @@ export function SupplierLedgerPage() {
                   </tr>
                 );
               })}
-              {filtered.length === 0 && (
+
+              {!loadingLedger && filtered.length === 0 && (
                 <tr>
                   <td colSpan={8} className="px-5 py-12 text-center text-[13px]" style={{ color: COLORS.muted }}>
-                    No ledger entries found.
+                    No ledger entries found for this supplier.
                   </td>
                 </tr>
               )}
             </tbody>
+
             {filtered.length > 0 && (
               <tfoot>
                 <tr style={{ backgroundColor: vermillionSoft }}>
@@ -409,20 +541,34 @@ export function SupplierLedgerPage() {
 
         {/* Footer / pagination */}
         <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-6 py-4 border-t text-[13px]" style={{ borderColor: COLORS.line, color: COLORS.muted }}>
-          <span>Showing 1 to {Math.min(perPage, filtered.length)} of {filtered.length} entries</span>
+          <span>
+            Showing {filtered.length === 0 ? 0 : (currentPage - 1) * perPage + 1} to {Math.min(currentPage * perPage, filtered.length)} of {filtered.length} entries
+          </span>
           <div className="flex items-center gap-1.5">
-            <button className="w-8 h-8 rounded-md border flex items-center justify-center disabled:opacity-40" style={{ borderColor: COLORS.line, color: COLORS.muted }} disabled>
+            <button
+              onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))}
+              disabled={currentPage === 1}
+              className="w-8 h-8 rounded-md border flex items-center justify-center disabled:opacity-40"
+              style={{ borderColor: COLORS.line, color: COLORS.muted }}
+            >
               <ChevronLeft size={14} />
             </button>
-            <span className="w-8 h-8 rounded-md flex items-center justify-center font-semibold text-white" style={{ backgroundColor: COLORS.vermillion }}>1</span>
-            <button className="w-8 h-8 rounded-md border flex items-center justify-center" style={{ borderColor: COLORS.line, color: COLORS.ink }}>
+            <span className="w-8 h-8 rounded-md flex items-center justify-center font-semibold text-white" style={{ backgroundColor: COLORS.vermillion }}>
+              {currentPage}
+            </span>
+            <button
+              onClick={() => setCurrentPage((p) => Math.min(p + 1, totalPages))}
+              disabled={currentPage >= totalPages}
+              className="w-8 h-8 rounded-md border flex items-center justify-center disabled:opacity-40"
+              style={{ borderColor: COLORS.line, color: COLORS.ink }}
+            >
               <ChevronRight size={14} />
             </button>
           </div>
         </div>
       </div>
 
-      <LedgerDetailModal entry={selectedEntry} supplier={supplier} onClose={() => setSelectedEntry(null)} />
+      <LedgerDetailModal entry={selectedEntry} supplier={activeSupplier} onClose={() => setSelectedEntry(null)} />
     </div>
   );
 }

@@ -8,7 +8,8 @@ class Sale extends Model
 {
     protected $fillable = [
         'invoice_no', 'branch_id', 'customer_id', 'created_by',
-        'sub_total', 'discount', 'vat', 'total', 'paid', 'due',
+        'sub_total', 'discount', 'vat', 'others_charge', 'others_label',
+        'total', 'paid', 'due',
         'status', 'sale_date',
     ];
 

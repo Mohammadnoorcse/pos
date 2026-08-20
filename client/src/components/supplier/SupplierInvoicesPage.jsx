@@ -1,21 +1,28 @@
 import React from "react";
-import { Search, ChevronLeft, ChevronRight, FileText } from "lucide-react";
+import { Search, ChevronLeft, ChevronRight, FileText, Loader2 } from "lucide-react";
 import { COLORS, FONTS } from "../../constants";
+import { fetchPurchases } from "../../api/supplier/purchaseService";
 
-// Colors below are pulled directly from your existing constants file —
-// same magenta / paper / panel / ink / muted / vermillion tokens as PurchasePage.jsx.
-// (magentaSoft is derived here only because "Paid" pill needs a light tint of magenta;
-// if you already have a soft/tint token in constants.js, swap this line to use it instead.)
 const magentaSoft = COLORS.magentaSoft || `${COLORS.magenta}1A`;
 
-const INVOICES = [
-  { date: "27-04-2025", name: "Matador", phone: "01784848944", company: "Matador BD", amount: 6500, paid: 5000, inv: "STB/230710646/98" },
-  { date: "19-04-2025", name: "kudus", phone: "01789654131", company: "7up", amount: 6000, paid: 990, inv: "STB/230710646/97" },
-  { date: "10-04-2025", name: "Siraj", phone: "01717777744", company: "Siraj Enterprise", amount: 5100, paid: 0, inv: "STB/230710646/96" },
-  { date: "10-04-2025", name: "Siraj", phone: "01717777744", company: "Siraj Enterprise", amount: 1500, paid: 0, inv: "STB/230710646/95" },
-  { date: "02-04-2025", name: "Rahmat Ali", phone: "01911223344", company: "Microlab", amount: 3200, paid: 3200, inv: "STB/230710646/94" },
-  { date: "28-03-2025", name: "Sohag Ahmed", phone: "01766554433", company: "Cock", amount: 4800, paid: 2000, inv: "STB/230710646/93" },
-];
+function formatDisplayDate(isoDate) {
+  const d = new Date(isoDate);
+  if (Number.isNaN(d.getTime())) return isoDate;
+  return d.toLocaleDateString("en-GB").replace(/\//g, "-"); // dd-mm-yyyy
+}
+
+function mapRow(p) {
+  return {
+    id: p.id,
+    date: p.purchase_date,
+    name: p.supplier?.name ?? "—",
+    phone: p.supplier?.phone ?? "—",
+    company: p.supplier?.company ?? "—",
+    amount: Number(p.total ?? 0),
+    paid: Number(p.paid ?? 0),
+    inv: p.invoice_no,
+  };
+}
 
 function StatusPill({ amount, paid }) {
   const due = amount - paid;
@@ -50,10 +57,45 @@ function StatusPill({ amount, paid }) {
 export function SupplierInvoicesPage() {
   const [query, setQuery] = React.useState("");
   const [perPage, setPerPage] = React.useState(100);
+  const [page, setPage] = React.useState(1);
 
-  const filtered = INVOICES.filter((r) =>
-    [r.name, r.company, r.inv, r.phone].join(" ").toLowerCase().includes(query.toLowerCase())
-  );
+  const [rows, setRows] = React.useState([]);
+  const [meta, setMeta] = React.useState({ total: 0, current_page: 1, last_page: 1 });
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState(null);
+
+  const load = React.useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const res = await fetchPurchases({
+        search: query || undefined,
+        per_page: perPage,
+        page,
+      });
+      setRows((res.data || []).map(mapRow));
+      setMeta({ total: res.total ?? 0, current_page: res.current_page ?? 1, last_page: res.last_page ?? 1 });
+    } catch (err) {
+      console.error("Error loading supplier invoices:", err);
+      setError(err.message || "Failed to load invoices.");
+    } finally {
+      setLoading(false);
+    }
+  }, [query, perPage, page]);
+
+  React.useEffect(() => {
+    const t = setTimeout(() => {
+      setPage(1);
+      load();
+    }, 350);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query, perPage]);
+
+  React.useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page]);
 
   return (
     <div className="p-6" style={{ backgroundColor: COLORS.paper, fontFamily: FONTS.BODY, minHeight: "100%" }}>
@@ -129,51 +171,67 @@ export function SupplierInvoicesPage() {
               </tr>
             </thead>
             <tbody>
-              {filtered.slice(0, perPage).map((row, i) => (
-                <tr
-                  key={i}
-                  className="border-b hover:bg-black/[0.02] transition-colors"
-                  style={{ borderColor: COLORS.line }}
-                >
-                  <td className="px-5 py-3.5 align-top whitespace-nowrap" style={{ color: COLORS.ink, fontFamily: FONTS.MONO, fontSize: 12.5 }}>
-                    {row.date}
-                  </td>
-                  <td className="px-5 py-3.5 align-top">
-                    <div className="font-semibold" style={{ color: COLORS.ink }}>
-                      {row.name}
+              {loading ? (
+                <tr>
+                  <td colSpan={6} className="px-5 py-12 text-center" style={{ color: COLORS.muted }}>
+                    <div className="flex items-center justify-center gap-2">
+                      <Loader2 className="animate-spin" size={18} />
+                      Loading invoices...
                     </div>
-                    <div className="text-[11.5px] mt-0.5" style={{ color: COLORS.muted }}>
-                      Phone: {row.phone}
-                    </div>
-                    <div className="text-[11.5px]" style={{ color: COLORS.muted }}>
-                      Company Name: {row.company}
-                    </div>
-                  </td>
-                  <td className="px-5 py-3.5 align-top font-semibold" style={{ color: COLORS.ink, fontFamily: FONTS.MONO }}>
-                    {row.amount.toLocaleString()}
-                  </td>
-                  <td className="px-5 py-3.5 align-top" style={{ color: COLORS.ink, fontFamily: FONTS.MONO }}>
-                    {row.paid.toLocaleString()}
-                  </td>
-                  <td className="px-5 py-3.5 align-top">
-                    <StatusPill amount={row.amount} paid={row.paid} />
-                  </td>
-                  <td className="px-5 py-3.5 align-top">
-                    <button
-                      className="font-semibold hover:underline"
-                      style={{ color: COLORS.magenta, fontFamily: FONTS.MONO, fontSize: 12.5 }}
-                    >
-                      {row.inv}
-                    </button>
                   </td>
                 </tr>
-              ))}
-              {filtered.length === 0 && (
+              ) : error ? (
+                <tr>
+                  <td colSpan={6} className="px-5 py-12 text-center text-[13px]" style={{ color: COLORS.vermillion }}>
+                    {error}
+                  </td>
+                </tr>
+              ) : rows.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="px-5 py-12 text-center text-[13px]" style={{ color: COLORS.muted }}>
                     No matching invoices found.
                   </td>
                 </tr>
+              ) : (
+                rows.map((row) => (
+                  <tr
+                    key={row.id}
+                    className="border-b hover:bg-black/[0.02] transition-colors"
+                    style={{ borderColor: COLORS.line }}
+                  >
+                    <td className="px-5 py-3.5 align-top whitespace-nowrap" style={{ color: COLORS.ink, fontFamily: FONTS.MONO, fontSize: 12.5 }}>
+                      {formatDisplayDate(row.date)}
+                    </td>
+                    <td className="px-5 py-3.5 align-top">
+                      <div className="font-semibold" style={{ color: COLORS.ink }}>
+                        {row.name}
+                      </div>
+                      <div className="text-[11.5px] mt-0.5" style={{ color: COLORS.muted }}>
+                        Phone: {row.phone}
+                      </div>
+                      <div className="text-[11.5px]" style={{ color: COLORS.muted }}>
+                        Company Name: {row.company}
+                      </div>
+                    </td>
+                    <td className="px-5 py-3.5 align-top font-semibold" style={{ color: COLORS.ink, fontFamily: FONTS.MONO }}>
+                      {row.amount.toLocaleString()}
+                    </td>
+                    <td className="px-5 py-3.5 align-top" style={{ color: COLORS.ink, fontFamily: FONTS.MONO }}>
+                      {row.paid.toLocaleString()}
+                    </td>
+                    <td className="px-5 py-3.5 align-top">
+                      <StatusPill amount={row.amount} paid={row.paid} />
+                    </td>
+                    <td className="px-5 py-3.5 align-top">
+                      <button
+                        className="font-semibold hover:underline"
+                        style={{ color: COLORS.magenta, fontFamily: FONTS.MONO, fontSize: 12.5 }}
+                      >
+                        {row.inv}
+                      </button>
+                    </td>
+                  </tr>
+                ))
               )}
             </tbody>
           </table>
@@ -185,13 +243,14 @@ export function SupplierInvoicesPage() {
           style={{ borderColor: COLORS.line, color: COLORS.muted }}
         >
           <span>
-            Showing 1 to {Math.min(perPage, filtered.length)} of {filtered.length} entries
+            Page {meta.current_page} of {meta.last_page} · {meta.total} total entries
           </span>
           <div className="flex items-center gap-1.5">
             <button
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={meta.current_page <= 1 || loading}
               className="w-8 h-8 rounded-md border flex items-center justify-center disabled:opacity-40"
               style={{ borderColor: COLORS.line, color: COLORS.muted }}
-              disabled
             >
               <ChevronLeft size={14} />
             </button>
@@ -199,10 +258,12 @@ export function SupplierInvoicesPage() {
               className="w-8 h-8 rounded-md flex items-center justify-center font-semibold text-white"
               style={{ backgroundColor: COLORS.magenta }}
             >
-              1
+              {meta.current_page}
             </span>
             <button
-              className="w-8 h-8 rounded-md border flex items-center justify-center"
+              onClick={() => setPage((p) => Math.min(meta.last_page, p + 1))}
+              disabled={meta.current_page >= meta.last_page || loading}
+              className="w-8 h-8 rounded-md border flex items-center justify-center disabled:opacity-40"
               style={{ borderColor: COLORS.line, color: COLORS.ink }}
             >
               <ChevronRight size={14} />

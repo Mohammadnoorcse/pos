@@ -28,8 +28,12 @@ class UserFactory extends Factory
             'name' => fake()->name(),
             'email' => fake()->unique()->safeEmail(),
             'email_verified_at' => now(),
-            'password' => static::$password ??= Hash::make('password'),
+            'password' => static::$password ??= Hash::make('12345678'),
             'remember_token' => Str::random(10),
+            'user_type' => 'user',
+            'admin_role_id' => null,
+            'branch_id' => null,
+            'branch_role_id' => null,
         ];
     }
 
@@ -40,6 +44,16 @@ class UserFactory extends Factory
     {
         return $this->state(fn (array $attributes) => [
             'email_verified_at' => null,
+        ]);
+    }
+
+    /**
+     * Indicate that the user is an owner.
+     */
+    public function owner(): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'user_type' => 'owner',
         ]);
     }
 }

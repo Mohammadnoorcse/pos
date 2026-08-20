@@ -3,7 +3,7 @@ import { Sidebar } from "./Sidebar";
 import { Topbar } from "./Topbar";
 import { COLORS, FONTS } from "../../constants";
 
-export function MainLayout({ children, activePage, onNavigate, user,onLogout }) {
+export function MainLayout({ children, activePage, onNavigate, user, onLogout }) {
   const [wing, setWing] = useState(null);
 
   return (
@@ -25,7 +25,13 @@ export function MainLayout({ children, activePage, onNavigate, user,onLogout }) 
           </span>
         </div>
 
-        <Sidebar activePage={activePage} onNavigate={onNavigate} wing={wing} onBack={() => setWing(null)} />
+        <Sidebar
+          activePage={activePage}
+          onNavigate={onNavigate}
+          wing={wing}
+          onBack={() => setWing(null)}
+          user={user}
+        />
       </aside>
 
       <div className="flex-1 min-w-0 flex flex-col">

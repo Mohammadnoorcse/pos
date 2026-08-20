@@ -9,7 +9,12 @@ class Branch extends Model
 {
     use HasFactory;
 
-    protected $fillable = ['name', 'address', 'type', 'phone', 'is_active'];
+    protected $fillable = ['name', 'address', 'type', 'phone', 'is_active', 'is_main'];
+
+    protected $casts = [
+        'is_active' => 'boolean',
+        'is_main' => 'boolean',
+    ];
 
     public function stocks()
     {

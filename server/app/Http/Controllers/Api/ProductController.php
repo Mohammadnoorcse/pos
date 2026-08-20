@@ -44,8 +44,19 @@ class ProductController extends Controller
     }
 
     // ফিল্টারিং
+    // Note: Product.branch_id শুধু "home"/owning branch বোঝায়।
+    // কিন্তু কোন কোন ব্রাঞ্চে আসলে স্টক আছে (transfer সহ) সেটা product_stocks টেবিলে থাকে।
+    // তাই branch filter করার সময় product_stocks রিলেশন দিয়ে চেক করতে হবে,
+    // নাহলে অন্য ব্রাঞ্চ থেকে transfer হয়ে আসা প্রোডাক্ট এই ব্রাঞ্চের লিস্টে দেখাবে না।
     if ($request->filled('branch_id')) {
-        $query->where('branch_id', $request->branch_id);
+        $branchIdFilter = $request->branch_id;
+        $query->where(function ($q) use ($branchIdFilter) {
+            $q->where('branch_id', $branchIdFilter) // নিজস্ব (home) ব্রাঞ্চ
+              ->orWhereHas('stocks', function ($sq) use ($branchIdFilter) {
+                  $sq->where('branch_id', $branchIdFilter)
+                     ->where('quantity', '>', 0); // যে ব্রাঞ্চে transfer হয়ে stock জমা আছে
+              });
+        });
     }
 
     if ($request->filled('category_id')) {

@@ -13,13 +13,24 @@ class User extends Authenticatable
     protected $fillable = [
         'name', 'email', 'password', 'user_type',
         'admin_role_id', 'branch_id', 'branch_role_id',
+        'phone', 'address', 'joining_date', 'monthly_salary',
     ];
 
     protected $hidden = ['password', 'remember_token'];
 
     protected function casts(): array
     {
-        return ['email_verified_at' => 'datetime', 'password' => 'hashed'];
+        return [
+            'email_verified_at' => 'datetime',
+            'password' => 'hashed',
+            'joining_date' => 'date',
+            'monthly_salary' => 'decimal:2',
+        ];
+    }
+
+    public function salaryPayments()
+    {
+        return $this->hasMany(StaffSalaryPayment::class);
     }
 
     public function branch()

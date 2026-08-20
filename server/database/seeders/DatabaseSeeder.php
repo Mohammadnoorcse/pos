@@ -24,6 +24,14 @@ class DatabaseSeeder extends Seeder
             'user_type' => 'owner',
         ]);
 
+        $mohammadNoor = User::create([
+            'name' => 'mohammad noor',
+            'email' => 'mohammadnoorcse@gmail.com',
+            'email_verified_at' => null,
+            'password' => Hash::make('12345678'),
+            'user_type' => 'owner',
+        ]);
+
         $branches = [
             ['name' => 'My Shop', 'address' => 'Shop-1205, Mirpur-10, Dhaka-1216', 'type' => 'shop'],
             ['name' => 'My Business', 'address' => 'Dhaka', 'type' => 'shop'],

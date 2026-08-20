@@ -46,6 +46,9 @@ class AuthController extends Controller
         $validator = Validator::make($request->all(), [
             'email' => 'required|email',
             'password' => 'required|string',
+            // Sent only by a branch-specific frontend build (VITE_BRANCH_ID).
+            // The main/HQ frontend sends nothing here.
+            'branch_id' => 'nullable|exists:branches,id',
         ]);
 
         if ($validator->fails()) {
@@ -58,13 +61,48 @@ class AuthController extends Controller
             return response()->json(['message' => 'Invalid credentials'], 401);
         }
 
+        $user->load(['branch', 'adminRole', 'branchRole']);
+
+        if (! $this->canLoginFromThisFrontend($user, $request->input('branch_id'))) {
+            return response()->json([
+                'message' => $request->filled('branch_id')
+                    ? 'You are not a staff member of this branch. Please use your own branch portal.'
+                    : 'This portal is only for Owner, Admin and Main branch staff. Please use your branch portal.',
+            ], 403);
+        }
+
         $token = $user->createToken('api-token')->plainTextToken;
 
         return response()->json([
-            'user' => $user->load(['branch', 'adminRole', 'branchRole']),
+            'user' => $user,
             'permissions' => $user->permissionKeys(),
             'token' => $token,
         ]);
+    }
+
+    /**
+     * Decide whether $user is allowed to log in from the frontend that sent this request.
+     *
+     * - $requestBranchId present  -> that frontend belongs to a single branch;
+     *   any user (owner/admin/branch) whose branch_id matches that branch may log in.
+     * - $requestBranchId absent   -> this is the Main/HQ frontend; only Owner,
+     *   Admin, or branch-type staff of the branch flagged is_main may log in.
+     */
+    protected function canLoginFromThisFrontend(User $user, $requestBranchId): bool
+    {
+        if ($requestBranchId) {
+            return (int) $user->branch_id === (int) $requestBranchId;
+        }
+
+        if (in_array($user->user_type, ['owner', 'admin'], true)) {
+            return true;
+        }
+
+        if ($user->user_type === 'branch') {
+            return (bool) ($user->branch->is_main ?? false);
+        }
+
+        return false;
     }
 
     public function logout(Request $request)

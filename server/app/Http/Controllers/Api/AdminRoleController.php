@@ -22,6 +22,7 @@ class AdminRoleController extends Controller
         ],
         'Main_Wing' => [
             'admin.branch.product.stock', 'admin.crm', 'admin.damage.product', 'admin.dashboard',
+            'admin.staff.view', 'admin.staff.manage', 'admin.staff.salary.manage',
         ],
         'Supplier_Wing' => [
             'supplier.dashboard', 'supplier.due.report', 'supplier.ledger', 'supplier.payment',

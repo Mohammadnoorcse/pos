@@ -4,6 +4,7 @@ export function usePageState(initialPage = "dashboard") {
   const [activePage, setActivePage] = React.useState(initialPage);
   const [selectedRole, setSelectedRole] = React.useState(null);
   const [selectedBranchRole, setSelectedBranchRole] = React.useState(null);
+  const [selectedStaff, setSelectedStaff] = React.useState(null);
   const [transferHistory, setTransferHistory] = React.useState([]);
 
   const addTransferRecord = (record) =>
@@ -16,6 +17,8 @@ export function usePageState(initialPage = "dashboard") {
     setSelectedRole,
     selectedBranchRole,
     setSelectedBranchRole,
+    selectedStaff,
+    setSelectedStaff,
     transferHistory,
     addTransferRecord,
   };

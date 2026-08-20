@@ -16,7 +16,7 @@ class CustomerController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-        $query = Customer::query()->withCount('sales');
+        $query = Customer::query()->withCount('sales')->withSum('sales as due', 'due');
 
         if ($request->filled('branch_id')) {
             $query->where('branch_id', $request->branch_id);
@@ -192,6 +192,7 @@ class CustomerController extends Controller
                 'nullable', 'string', 'max:20',
                 Rule::unique('customers', 'phone')->ignore($customerId),
             ],
+            'address' => ['nullable', 'string', 'max:255'],
             'branch_id' => ['nullable', 'exists:branches,id'],
         ]);
     }

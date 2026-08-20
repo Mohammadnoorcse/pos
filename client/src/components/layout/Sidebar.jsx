@@ -2,25 +2,52 @@ import React from "react";
 import { ChevronDown, ChevronRight, ArrowLeft } from "lucide-react";
 import { NAV_ITEMS } from "../../constants";
 import { SUPPLIER_NAV_ITEMS } from "../../constants";
-import { GODOWN_NAV_ITEMS } from "../../constants";
 import { ACC_NAV_ITEMS } from "../../constants";
 
-
 import { COLORS, FONTS } from "../../constants";
+import { canSeeNavItem, getStoredPermissions } from "../../api/permissions";
 
 // Map wing id -> { title, items }. Add more wings here as you build them
 // (Acc & Transaction Wing, etc.) following the same shape.
 const WINGS = {
   supplier: { title: "Supplier Wing", items: SUPPLIER_NAV_ITEMS },
-  godowns: { title: "Godowns Wing", items: GODOWN_NAV_ITEMS },
-  acc: { title: "Acc & Transaction Wing", items: ACC_NAV_ITEMS }
+  acc: { title: "Acc & Transaction Wing", items: ACC_NAV_ITEMS },
 };
 
-export function Sidebar({ activePage, onNavigate, wing, onBack }) {
+/**
+ * টপ-লেভেল ও children — দুই লেভেলেই permission/ownerOnly চেক করে
+ * যা দেখার অনুমতি নেই তা বাদ দিয়ে একটা নতুন লিস্ট বানায়।
+ * expandable আইটেম তখনই দেখানো হবে যখন তার নিজের permission পাশ করে
+ * *এবং* অন্তত একটা children দেখার অনুমতি থাকে (children থাকলে)।
+ */
+function filterNavItems(items, ctx) {
+  return items
+    .filter((item) => canSeeNavItem(item, ctx))
+    .map((item) => {
+      if (!item.children || item.children.length === 0) return item;
+      const visibleChildren = item.children.filter((child) => canSeeNavItem(child, ctx));
+      return { ...item, children: visibleChildren };
+    })
+    .filter((item) => {
+      // মূলে children ছিল কিন্তু ফিল্টারের পর একটাও বাকি নেই -> পুরো গ্রুপটাই লুকিয়ে ফেলো
+      const hadChildren = Array.isArray(item.children) && item.children.length === 0;
+      const originalHadChildren = items.find((i) => i.id === item.id)?.children?.length > 0;
+      if (originalHadChildren && hadChildren) return false;
+      return true;
+    });
+}
+
+export function Sidebar({ activePage, onNavigate, wing, onBack, user }) {
   const [openId, setOpenId] = React.useState("shop-setting");
 
   const activeWing = wing ? WINGS[wing] : null;
-  const items = activeWing ? activeWing.items : NAV_ITEMS;
+  const rawItems = activeWing ? activeWing.items : NAV_ITEMS;
+
+  const permissions = getStoredPermissions();
+  const items = React.useMemo(
+    () => filterNavItems(rawItems, { permissions, user }),
+    [rawItems, permissions, user]
+  );
 
   return (
     <nav className="space-y-0.5 overflow-y-auto pr-2">

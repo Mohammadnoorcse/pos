@@ -27,6 +27,12 @@ class DamageController extends Controller
                 })
                 ->orWhere('reason', 'LIKE', "%{$search}%");
             })
+            ->when($request->filled('branch_id'), function ($query) use ($request) {
+                $query->where('branch_id', $request->branch_id);
+            })
+            ->when($request->filled('range'), function ($query) use ($request) {
+                $this->applyDateRange($query, $request->range, 'created_at');
+            })
             ->latest()
             ->paginate($limit);
 
@@ -61,6 +67,43 @@ class DamageController extends Controller
                 'totalPages' => $records->lastPage(),
             ]
         ]);
+    }
+
+    /**
+     * Apply a date-range filter (today, this_week, this_month, this_year) on the given column.
+     */
+    protected function applyDateRange($query, string $range, string $column): void
+    {
+        $today = now();
+
+        switch ($range) {
+            case 'today':
+                $query->whereDate($column, $today->toDateString());
+                break;
+
+            case 'this_week':
+                $query->whereBetween($column, [
+                    $today->copy()->startOfWeek(),
+                    $today->copy()->endOfWeek(),
+                ]);
+                break;
+
+            case 'this_month':
+                $query->whereBetween($column, [
+                    $today->copy()->startOfMonth(),
+                    $today->copy()->endOfMonth(),
+                ]);
+                break;
+
+            case 'this_year':
+                $query->whereBetween($column, [
+                    $today->copy()->startOfYear(),
+                    $today->copy()->endOfYear(),
+                ]);
+                break;
+
+            // Unknown/blank range values are ignored — no date filter applied.
+        }
     }
 
     /**
@@ -126,17 +169,32 @@ class DamageController extends Controller
 
     /**
      * Fetch Products for selection table (Add Damage Product View).
+     *
+     * শুধু এই ব্রাঞ্চের প্রোডাক্টই দেখাবে — নিজস্ব (home) ব্রাঞ্চের প্রোডাক্ট
+     * এবং অন্য ব্রাঞ্চ থেকে transfer হয়ে এই ব্রাঞ্চে stock জমা থাকা প্রোডাক্ট,
+     * ঠিক ProductController::index এর মতো লজিক — নাহলে transfer হয়ে আসা
+     * প্রোডাক্ট ড্যামেজ লিস্টে দেখাবে না।
      */
     public function getProducts(Request $request)
     {
         $search = $request->query('search', '');
-        $limit = (int) $request->query('limit', 100);
+        $limit = (int) $request->query('limit', $request->query('per_page', 100));
+        $branchId = $request->query('branch_id');
 
         $products = Product::when($search, function ($query) use ($search) {
                 $query->where('title', 'LIKE', "%{$search}%")
                       ->orWhere('barcode', 'LIKE', "%{$search}%");
             })
-            ->select('id', 'title as name', 'barcode')
+            ->when($branchId, function ($query) use ($branchId) {
+                $query->where(function ($q) use ($branchId) {
+                    $q->where('branch_id', $branchId) // নিজস্ব (home) ব্রাঞ্চ
+                      ->orWhereHas('stocks', function ($sq) use ($branchId) {
+                          $sq->where('branch_id', $branchId)
+                             ->where('quantity', '>', 0); // transfer হয়ে stock জমা আছে
+                      });
+                });
+            })
+            ->select('id', 'title as name', 'barcode', 'branch_id', 'purchase_price', 'selling_price')
             ->orderBy('title', 'asc')
             ->paginate($limit);
 

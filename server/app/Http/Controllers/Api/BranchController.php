@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Branch;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class BranchController extends Controller
 {
@@ -29,9 +30,16 @@ class BranchController extends Controller
             'address' => 'nullable|string|max:500',
             'type' => 'required|in:shop,godown',
             'phone' => 'nullable|string|max:50',
+            'is_main' => 'boolean',
         ]);
 
-        $branch = Branch::create($data);
+        $branch = DB::transaction(function () use ($data) {
+            // Only one branch can ever be the Main/HQ branch.
+            if (! empty($data['is_main'])) {
+                Branch::where('is_main', true)->update(['is_main' => false]);
+            }
+            return Branch::create($data);
+        });
 
         return response()->json($branch, 201);
     }
@@ -49,11 +57,18 @@ class BranchController extends Controller
             'type' => 'sometimes|required|in:shop,godown',
             'phone' => 'nullable|string|max:50',
             'is_active' => 'boolean',
+            'is_main' => 'boolean',
         ]);
 
-        $branch->update($data);
+        DB::transaction(function () use ($data, $branch) {
+            // Only one branch can ever be the Main/HQ branch.
+            if (! empty($data['is_main'])) {
+                Branch::where('is_main', true)->where('id', '!=', $branch->id)->update(['is_main' => false]);
+            }
+            $branch->update($data);
+        });
 
-        return response()->json($branch);
+        return response()->json($branch->fresh());
     }
 
     public function destroy(Branch $branch)

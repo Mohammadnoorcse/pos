@@ -4,3 +4,5 @@ export { RolePermissionsPage } from "./RolePermissionsPage";
 export { BranchRolesPage } from "./BranchRolesPage";
 export { BranchRolePermissionsPage } from "./BranchRolePermissionsPage";
 export { CRMPage } from "./CRMPage";
+export { StaffPage } from "./StaffPage";
+export { StaffDetailPage } from "./StaffDetailPage";

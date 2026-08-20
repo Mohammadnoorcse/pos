@@ -18,6 +18,8 @@ import {
   BranchRolesPage,
   BranchRolePermissionsPage,
   CRMPage,
+  StaffPage,
+  StaffDetailPage,
   ProductStocksPage,
   StockAlertQtyPage,
   CreateTransferPage,
@@ -34,12 +36,14 @@ import { PAGE_LABELS } from "./constants";
 import { ProductsLedger } from "./components/pages/Ledgers/ProductsLedger";
 import { ShopCustomers } from "./components/pages/Shopcustomers";
 import { DuePaymentInvoices } from "./components/pages/Payment";
-import { DueConnectionReportPage, DuePurchaseReportPage, ProductReturnPage, ProductSuppliers, PurchaseInvoiceReportPage, PurchasePage, SupplierInvoicesPage, SupplierLedgerPage, SupplierPaymentPage } from "./components/supplier";
-import { CurrentStockInfoPage, GodownDashboardPage, StockTransferPage,StockTransferInvoicesPage,StockInOutReportPage } from "./components/Godown";
+import { DueConnectionReportPage, DuePurchaseReportPage, ProductReturnPage, ProductSuppliers, PurchaseInvoiceReportPage, PurchasePage, SupplierDashboardPage, SupplierInvoicesPage, SupplierLedgerPage, SupplierPaymentPage } from "./components/supplier";
 import { BankDetailsPage,CashFlowPage,ContraTransferPage,TakeCustomerDuePage,SupplierPaymentAcc, ExpensesAcc,IncomesAcc,VouchersAcc,LoanCapitalPage} from "./components/Acc";
 
 
 import SellPage  from "./components/pages/Sell/SellPage";
+import { AccessDeniedPage } from "./components/layout/AccessDeniedPage";
+import { PAGE_ACCESS_MAP } from "./constants/pageAccess";
+import { getStoredPermissions, canSeeNavItem } from "./api/permissions";
 
 
 // user, onLogout -> App.js theke ashche (logged-in user + logout handler)
@@ -53,11 +57,24 @@ export default function Dashboard({ user, onLogout }) {
     setSelectedRole,
     selectedBranchRole,
     setSelectedBranchRole,
+    selectedStaff,
+    setSelectedStaff,
     transferHistory,
     addTransferRecord,
   } = usePageState();
 
   const renderPage = () => {
+    // ইউজার সাইডবারে না দেখলেও activePage সরাসরি বদলে (deep-link/state hack) কেউ
+    // যেন গোপন পাতায় ঢুকতে না পারে — এখানে একবার centrally চেক করা হয়।
+    const access = PAGE_ACCESS_MAP[activePage];
+    if (access) {
+      const permissions = getStoredPermissions();
+      const allowed = canSeeNavItem(access, { permissions, user });
+      if (!allowed) {
+        return <AccessDeniedPage label={PAGE_LABELS[activePage] || activePage} />;
+      }
+    }
+
     switch (activePage) {
       case "dashboard":
         return <DashboardPage />;
@@ -123,6 +140,22 @@ export default function Dashboard({ user, onLogout }) {
         );
       case "crm":
         return <CRMPage />;
+      case "staff":
+        return (
+          <StaffPage
+            onOpenStaff={(staff) => {
+              setSelectedStaff(staff);
+              setActivePage("staff-detail");
+            }}
+          />
+        );
+      case "staff-detail":
+        return (
+          <StaffDetailPage
+            staff={selectedStaff}
+            onBack={() => setActivePage("staff")}
+          />
+        );
 
       // Stock
       case "product-stocks":
@@ -163,6 +196,8 @@ export default function Dashboard({ user, onLogout }) {
         return < DuePaymentInvoices/>;
 
         // supplier
+        case "supplier-dashboard":
+        return < SupplierDashboardPage/>;
         case "suppliers":
         return < ProductSuppliers/>;
         case "stock-in-purchase":
@@ -181,17 +216,7 @@ export default function Dashboard({ user, onLogout }) {
         return <ProductReturnPage/>;
         case "supplier-table-ledger":
         return <SupplierLedgerPage/>;
-        // GodownDashboardPage
-        case "godown-dashboard":
-        return <GodownDashboardPage/>;
-        case "current-stock-info":
-        return <CurrentStockInfoPage/>;
-        case "stock-transfer":
-        return <StockTransferPage/>;
-        case "stock-transfer-invoices":
-        return <StockTransferInvoicesPage/>;
-        case "stock-in-out-report":
-        return <StockInOutReportPage/>;
+      
 
         // account
         case "acc-banks":

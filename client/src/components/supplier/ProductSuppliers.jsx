@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   Search,
   ChevronDown,
@@ -6,6 +6,7 @@ import {
   Eye,
   Pencil,
   ChevronLeft,
+  ChevronRight,
   ArrowUpDown,
   User,
   Building2,
@@ -13,57 +14,28 @@ import {
   Mail,
   MapPin,
   Wallet,
+  Loader2,
 } from "lucide-react";
 import { ScallopBorder } from "../shared";
-import { COLORS, PETALS, FONTS} from "../../constants";
+import { COLORS, PETALS, FONTS } from "../../constants";
+import { fetchSuppliers, createSupplier } from "../../api/supplier/supplierService";
 
-
-
-const initialSuppliers = [
-  {
-    company: "7up",
-    supplier: "kudus",
-    code: "S230710646S3154",
-    phone: "01789654131",
-    address: "dhsaka",
-    balance: 11000.0,
-  },
-  {
-    company: "abul khair tin",
-    supplier: "asif",
-    code: "S230710646S6680",
-    phone: "0124867956",
-    address: "kotchadpur",
-    balance: 20376.0,
-  },
-  {
-    company: "aks rod",
-    supplier: "hasan",
-    code: "S230710646S6679",
-    phone: "012465952",
-    address: "dhaka",
-    balance: 261000.0,
-  },
-  {
-    company: "Allahr Dan 4",
-    supplier: "nazrul",
-    code: "S230710646S2788",
-    phone: "01675613452",
-    address: "d",
-    balance: 38560.0,
-  },
-  {
-    company: "Babu",
-    supplier: "IRA",
-    code: "S230710646S4513",
-    phone: "01796640727",
-    address: "Mirpur",
-    balance: 500.0,
-  },
-];
+function mapSupplierRow(s) {
+  return {
+    id: s.id,
+    company: s.company || "—",
+    supplier: s.name || "—",
+    code: s.code || `SUP-${String(s.id).padStart(4, "0")}`,
+    phone: s.phone || "—",
+    address: s.address || "—",
+    balance: Number(s.due ?? s.due_sum ?? 0),
+  };
+}
 
 function AddSupplierModal({ open, onClose, onAdd }) {
   const [form, setForm] = useState({ company: "", supplier: "", phone: "", address: "" });
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState(null);
 
   if (!open) return null;
 
@@ -71,18 +43,27 @@ function AddSupplierModal({ open, onClose, onAdd }) {
     setForm((f) => ({ ...f, [field]: val }));
   }
 
-  function submit() {
+  async function submit() {
     if (!form.company.trim()) return;
-    onAdd({
-      company: form.company,
-      supplier: form.supplier || "—",
-      code: `S${Date.now().toString().slice(-9)}`,
-      phone: form.phone || "—",
-      address: form.address || "—",
-      balance: 0,
-    });
-    setForm({ company: "", supplier: "", phone: "", address: "" });
-    onClose();
+    try {
+      setSubmitting(true);
+      setError(null);
+
+      // Backend API call
+      await onAdd({
+        name: form.supplier || form.company,
+        company: form.company,
+        phone: form.phone || null,
+        address: form.address || null,
+      });
+
+      setForm({ company: "", supplier: "", phone: "", address: "" });
+      onClose();
+    } catch (err) {
+      setError(err.message || "Failed to add supplier");
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   const fields = [
@@ -119,6 +100,12 @@ function AddSupplierModal({ open, onClose, onAdd }) {
           </button>
         </div>
 
+        {error && (
+          <div className="px-6 pt-4 text-xs font-semibold" style={{ color: COLORS.vermillion }}>
+            {error}
+          </div>
+        )}
+
         <div className="space-y-4 px-6 py-5">
           {fields.map((f) => (
             <div key={f.key}>
@@ -140,6 +127,7 @@ function AddSupplierModal({ open, onClose, onAdd }) {
         <div className="flex justify-end gap-3 px-6 py-4 border-t" style={{ borderColor: COLORS.line }}>
           <button
             onClick={onClose}
+            disabled={submitting}
             className="rounded-xl px-5 py-2.5 text-sm font-semibold border-[1.5px]"
             style={{ borderColor: COLORS.line, color: COLORS.muted }}
           >
@@ -147,9 +135,11 @@ function AddSupplierModal({ open, onClose, onAdd }) {
           </button>
           <button
             onClick={submit}
-            className="rounded-xl px-5 py-2.5 text-sm font-semibold text-white shadow-md"
+            disabled={submitting}
+            className="rounded-xl px-5 py-2.5 text-sm font-semibold text-white shadow-md flex items-center gap-2"
             style={{ backgroundColor: COLORS.purple, boxShadow: `0 4px 10px ${COLORS.purple}40` }}
           >
+            {submitting && <Loader2 className="animate-spin h-4 w-4" />}
             Add Supplier
           </button>
         </div>
@@ -300,17 +290,64 @@ function SupplierLedger({ supplier, onBack }) {
 }
 
 export function ProductSuppliers() {
-  const [suppliers, setSuppliers] = useState(initialSuppliers);
   const [search, setSearch] = useState("");
+  const [perPage, setPerPage] = useState(10);
+  const [page, setPage] = useState(1);
+
+  const [suppliers, setSuppliers] = useState([]);
+  const [meta, setMeta] = useState({ total: 0, current_page: 1, last_page: 1 });
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
   const [modalOpen, setModalOpen] = useState(false);
   const [view, setView] = useState("list");
   const [activeSupplier, setActiveSupplier] = useState(null);
 
-  const filtered = suppliers.filter(
-    (s) =>
-      s.company.toLowerCase().includes(search.toLowerCase()) ||
-      s.supplier.toLowerCase().includes(search.toLowerCase())
-  );
+  // Fetch Suppliers from API
+  const loadSuppliers = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const res = await fetchSuppliers({
+        search: search || undefined,
+        per_page: perPage,
+        page,
+      });
+
+      const items = res.data || (Array.isArray(res) ? res : []);
+      setSuppliers(items.map(mapSupplierRow));
+
+      setMeta({
+        total: res.total ?? items.length,
+        current_page: res.current_page ?? 1,
+        last_page: res.last_page ?? 1,
+      });
+    } catch (err) {
+      console.error("Error fetching suppliers:", err);
+      setError(err.message || "Failed to load suppliers.");
+    } finally {
+      setLoading(false);
+    }
+  }, [search, perPage, page]);
+
+  // Handle Search Debounce & Page resetting
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setPage(1);
+      loadSuppliers();
+    }, 350);
+    return () => clearTimeout(t);
+  }, [search, perPage]);
+
+  // Handle Page change
+  useEffect(() => {
+    loadSuppliers();
+  }, [page]);
+
+  const handleAddSupplier = async (newSupplierPayload) => {
+    await createSupplier(newSupplierPayload);
+    await loadSuppliers();
+  };
 
   if (view === "ledger" && activeSupplier) {
     return (
@@ -365,13 +402,16 @@ export function ProductSuppliers() {
           <div className="flex items-center gap-2 text-sm" style={{ color: COLORS.muted }}>
             <span>Show</span>
             <select
+              value={perPage}
+              onChange={(e) => setPerPage(Number(e.target.value))}
               className="rounded-lg px-2.5 py-1.5 text-sm border-[1.5px] outline-none"
               style={{ borderColor: COLORS.line, backgroundColor: COLORS.paper, color: COLORS.ink }}
             >
-              <option>10</option>
-              <option>25</option>
-              <option>50</option>
-              <option>100</option>
+              {[10, 25, 50, 100].map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
             </select>
             <span>entries</span>
           </div>
@@ -394,7 +434,7 @@ export function ProductSuppliers() {
         </div>
 
         {/* table */}
-        <div className="mt-5 overflow-x-auto px-7 pb-7">
+        <div className="mt-5 overflow-x-auto px-7 pb-4">
           <table className="w-full min-w-[1000px] border-collapse text-sm">
             <thead>
               <tr style={{ backgroundColor: COLORS.purpleTint }}>
@@ -413,79 +453,131 @@ export function ProductSuppliers() {
               </tr>
             </thead>
             <tbody>
-              {filtered.map((s, i) => (
-                <tr key={i} className="border-b" style={{ borderColor: COLORS.line }}>
-                  <td className="px-4 py-4 font-semibold" style={{ color: COLORS.ink }}>
-                    {s.company}
-                  </td>
-                  <td className="px-4 py-4" style={{ color: COLORS.muted }}>
-                    {s.supplier}
-                  </td>
-                  <td className="px-4 py-4" style={{ color: COLORS.muted, fontFamily: FONTS.MONO }}>
-                    {s.code}
-                  </td>
-                  <td className="px-4 py-4" style={{ color: COLORS.muted }}>
-                    {s.phone}
-                  </td>
-                  <td className="px-4 py-4" style={{ color: COLORS.muted }}>
-                    {s.address}
-                  </td>
-                  <td className="px-4 py-4 font-semibold" style={{ color: COLORS.ink }}>
-                    {s.balance.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                  </td>
-                  <td className="px-4 py-4">
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      <button
-                        className="flex h-7 w-7 items-center justify-center rounded-full text-white"
-                        style={{ backgroundColor: COLORS.forestDark }}
-                        title="View"
-                      >
-                        <Eye className="h-3.5 w-3.5" />
-                      </button>
-                      <button
-                        className="flex h-7 w-7 items-center justify-center rounded-full text-white"
-                        style={{ backgroundColor: COLORS.peacock }}
-                        title="Edit"
-                      >
-                        <Pencil className="h-3.5 w-3.5" />
-                      </button>
-                      <button
-                        onClick={() => {
-                          setActiveSupplier(s);
-                          setView("ledger");
-                        }}
-                        className="rounded-full px-3 py-1 text-xs font-bold text-white"
-                        style={{ backgroundColor: COLORS.marigold }}
-                      >
-                        Ledger
-                      </button>
-                      <button
-                        className="mt-1 w-full rounded-lg px-3 py-1 text-xs font-bold"
-                        style={{ backgroundColor: COLORS.purpleTint, color: COLORS.purple }}
-                      >
-                        Product Ledger
-                      </button>
+              {loading ? (
+                <tr>
+                  <td colSpan={7} className="px-4 py-12 text-center" style={{ color: COLORS.muted }}>
+                    <div className="flex items-center justify-center gap-2">
+                      <Loader2 className="animate-spin" size={18} />
+                      Loading suppliers...
                     </div>
                   </td>
                 </tr>
-              ))}
-              {filtered.length === 0 && (
+              ) : error ? (
+                <tr>
+                  <td colSpan={7} className="px-4 py-12 text-center text-sm" style={{ color: COLORS.vermillion }}>
+                    {error}
+                  </td>
+                </tr>
+              ) : suppliers.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="px-4 py-10 text-center" style={{ color: COLORS.muted }}>
                     No matching suppliers found.
                   </td>
                 </tr>
+              ) : (
+                suppliers.map((s) => (
+                  <tr key={s.id} className="border-b" style={{ borderColor: COLORS.line }}>
+                    <td className="px-4 py-4 font-semibold" style={{ color: COLORS.ink }}>
+                      {s.company}
+                    </td>
+                    <td className="px-4 py-4" style={{ color: COLORS.muted }}>
+                      {s.supplier}
+                    </td>
+                    <td className="px-4 py-4" style={{ color: COLORS.muted, fontFamily: FONTS.MONO }}>
+                      {s.code}
+                    </td>
+                    <td className="px-4 py-4" style={{ color: COLORS.muted }}>
+                      {s.phone}
+                    </td>
+                    <td className="px-4 py-4" style={{ color: COLORS.muted }}>
+                      {s.address}
+                    </td>
+                    <td className="px-4 py-4 font-semibold" style={{ color: COLORS.ink }}>
+                      {s.balance.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    </td>
+                    <td className="px-4 py-4">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <button
+                          className="flex h-7 w-7 items-center justify-center rounded-full text-white"
+                          style={{ backgroundColor: COLORS.forestDark }}
+                          title="View"
+                        >
+                          <Eye className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          className="flex h-7 w-7 items-center justify-center rounded-full text-white"
+                          style={{ backgroundColor: COLORS.peacock }}
+                          title="Edit"
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          onClick={() => {
+                            setActiveSupplier(s);
+                            setView("ledger");
+                          }}
+                          className="rounded-full px-3 py-1 text-xs font-bold text-white"
+                          style={{ backgroundColor: COLORS.marigold }}
+                        >
+                          Ledger
+                        </button>
+                        <button
+                          className="mt-1 w-full rounded-lg px-3 py-1 text-xs font-bold"
+                          style={{ backgroundColor: COLORS.purpleTint, color: COLORS.purple }}
+                        >
+                          Product Ledger
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))
               )}
             </tbody>
           </table>
+        </div>
+
+        {/* Footer / Pagination */}
+        <div
+          className="flex flex-col sm:flex-row items-center justify-between gap-3 px-7 py-4 border-t text-sm"
+          style={{ borderColor: COLORS.line, color: COLORS.muted }}
+        >
+          <span>
+            Page {meta.current_page} of {meta.last_page} · {meta.total} total entries
+          </span>
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={meta.current_page <= 1 || loading}
+              className="w-8 h-8 rounded-md border flex items-center justify-center disabled:opacity-40"
+              style={{ borderColor: COLORS.line, color: COLORS.muted }}
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+            <span
+              className="w-8 h-8 rounded-md flex items-center justify-center font-semibold text-white"
+              style={{ backgroundColor: COLORS.purple }}
+            >
+              {meta.current_page}
+            </span>
+            <button
+              onClick={() => setPage((p) => Math.min(meta.last_page, p + 1))}
+              disabled={meta.current_page >= meta.last_page || loading}
+              className="w-8 h-8 rounded-md border flex items-center justify-center disabled:opacity-40"
+              style={{ borderColor: COLORS.line, color: COLORS.ink }}
+            >
+              <ChevronRight className="h-4 w-4" />
+            </button>
+          </div>
         </div>
       </div>
 
       <AddSupplierModal
         open={modalOpen}
         onClose={() => setModalOpen(false)}
-        onAdd={(newSupplier) => setSuppliers((prev) => [newSupplier, ...prev])}
+        onAdd={handleAddSupplier}
       />
     </div>
   );
 }
+
+export default ProductSuppliers;

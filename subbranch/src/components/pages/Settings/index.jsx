@@ -1,0 +1,1 @@
+export { ShopSettingsPage } from "./ShopSettingsPage";

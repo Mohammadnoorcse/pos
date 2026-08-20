@@ -20,10 +20,10 @@ import { RegisterForm } from "../../AuthPages";
 const API_BASE = import.meta.env.VITE_API_URL;
 
 const wingItems = [
-  { id: "supplier", label: "Supplier Wing", icon: Users, tint: true },
-  { id: "godowns", label: "Godowns Wing", icon: Warehouse, tint: false },
+  { id: "main", label: "Main Dashboard", icon: Home, tint: true },
+  { id: "supplier", label: "Supplier Wing", icon: Users, tint: false },
   { id: "acc", label: "Acc & Transaction Wing", icon: Receipt, tint: false },
-  { id: "main", label: "Main Dashboard", icon: Home, tint: false },
+  
 ];
 
 function WingCard({ icon: Icon, label, tint, onClick }) {

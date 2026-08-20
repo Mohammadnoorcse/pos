@@ -1,6 +1,13 @@
-import React from "react";
-import { Search, ChevronLeft, ChevronRight, Wallet, Plus, X, Printer, Calendar, Hash, CreditCard, Phone, MapPin, ReceiptText, User, Building2 } from "lucide-react";
+import React, { useState, useEffect, useCallback } from "react";
+import { Search, ChevronLeft, ChevronRight, Wallet, Plus, X, Printer, Calendar, Hash, CreditCard, Phone, MapPin, ReceiptText, User, Building2, Loader2, Trash2 } from "lucide-react";
 import { COLORS, FONTS } from "../../constants";
+import {
+  fetchSupplierPayments,
+  createSupplierPayment,
+  deleteSupplierPayment,
+  fetchSuppliers,
+} from "../../api/supplier/supplierPaymentService";
+import { fetchPurchases } from "../../api/supplier/purchaseService";
 
 // Colors pulled directly from your existing constants file — same tokens used across
 // PurchasePage.jsx / SupplierInvoicesPage.jsx / DuePurchaseReportPage.jsx /
@@ -8,21 +15,31 @@ import { COLORS, FONTS } from "../../constants";
 const magentaSoft = COLORS.magentaSoft || `${COLORS.magenta}1A`;
 const vermillionSoft = `${COLORS.vermillion}1A`;
 
-const SUPPLIERS = [
-  { id: 1, name: "Matador", company: "Matador BD", phone: "01784848944", address: "Mirpur-10, Dhaka", due: 1500 },
-  { id: 2, name: "Siraj", company: "Siraj Enterprise", phone: "01717777744", address: "Chawkbazar, Chattogram", due: 6600 },
-  { id: 3, name: "Sohag Ahmed", company: "Cock", phone: "01766554433", address: "Bogura Sadar, Bogura", due: 2800 },
-  { id: 4, name: "nazrul", company: "Allahr Dan 4", phone: "01655221199", address: "Feni Sadar, Feni", due: 2300 },
-];
+const METHODS = ["Cash", "Bank Transfer", "bKash", "Nagad", "Cheque"];
 
-const METHODS = ["Cash", "Bank Transfer", "bKash", "Cheque"];
+// API থেকে আসা raw payment রেকর্ডকে UI-এর জন্য সহজবোধ্য shape-এ ম্যাপ করা
+function mapPayment(p) {
+  const invAmount = Number(p.purchase?.total ?? 0);
+  const invPaidTotal = Number(p.purchase?.paid ?? 0);
 
-const INITIAL_PAYMENTS = [
-  { id: "PMT-2041", date: "18-04-2025", supplier: "Matador", company: "Matador BD", phone: "01784848944", address: "Mirpur-10, Dhaka", invRef: "STB/230710646/98", invAmount: 6500, invPaidTotal: 5000, method: "Cash", amount: 5000, note: "Partial settlement", receivedBy: "Store Manager", paidBy: "Karim Uddin (Accounts)" },
-  { id: "PMT-2038", date: "12-04-2025", supplier: "kudus", company: "7up", phone: "01789654131", address: "Motijheel, Dhaka", invRef: "STB/230710646/97", invAmount: 6000, invPaidTotal: 6000, method: "Bank Transfer", amount: 6000, note: "Full payment", receivedBy: "Store Manager", paidBy: "Karim Uddin (Accounts)" },
-  { id: "PMT-2030", date: "05-04-2025", supplier: "Sohag Ahmed", company: "Cock", phone: "01766554433", address: "Bogura Sadar, Bogura", invRef: "STB/230710646/93", invAmount: 4800, invPaidTotal: 2000, method: "bKash", amount: 2000, note: "", receivedBy: "Store Manager", paidBy: "Karim Uddin (Accounts)" },
-  { id: "PMT-2019", date: "20-03-2025", supplier: "Rahmat Ali", company: "Microlab", phone: "01911223344", address: "Uttara, Dhaka", invRef: "STB/230710646/94", invAmount: 3200, invPaidTotal: 3200, method: "Cheque", amount: 3200, note: "Cheque #004521", receivedBy: "Store Manager", paidBy: "Karim Uddin (Accounts)" },
-];
+  return {
+    id: p.payment_no || `PMT-${p.id}`,
+    rawId: p.id,
+    date: p.paid_date,
+    supplier: p.supplier?.name || "—",
+    company: p.supplier?.company || "—",
+    phone: p.supplier?.phone || "—",
+    address: p.supplier?.address || "—",
+    invRef: p.purchase?.invoice_no || "—",
+    invAmount,
+    invPaidTotal,
+    method: p.method,
+    amount: Number(p.amount),
+    note: p.note || "",
+    receivedBy: p.received_by || "—",
+    paidBy: p.paid_by || "—",
+  };
+}
 
 function DetailRow({ icon: Icon, label, value, valueColor }) {
   return (
@@ -42,7 +59,7 @@ function DetailRow({ icon: Icon, label, value, valueColor }) {
   );
 }
 
-function PaymentDetailModal({ row, onClose }) {
+function PaymentDetailModal({ row, onClose, onDelete, deleting }) {
   if (!row) return null;
   const invDue = row.invAmount - row.invPaidTotal;
 
@@ -167,6 +184,15 @@ function PaymentDetailModal({ row, onClose }) {
 
         {/* Modal footer */}
         <div className="flex items-center justify-end gap-2 px-6 py-4 border-t print:hidden shrink-0" style={{ borderColor: COLORS.line }}>
+          <button
+            onClick={() => onDelete(row)}
+            disabled={deleting}
+            className="flex items-center gap-1.5 rounded-lg px-4 py-2 text-[13px] font-semibold border disabled:opacity-40"
+            style={{ borderColor: COLORS.vermillion, color: COLORS.vermillion }}
+          >
+            {deleting ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+            Delete
+          </button>
           <button onClick={onClose} className="rounded-lg px-4 py-2 text-[13px] font-semibold border" style={{ borderColor: COLORS.line, color: COLORS.ink }}>
             Close
           </button>
@@ -192,38 +218,69 @@ function PaymentDetailModal({ row, onClose }) {
   );
 }
 
-function AddPaymentModal({ open, onClose, onSave }) {
+function AddPaymentModal({ open, onClose, onSave, suppliers, saving }) {
   const [supplierId, setSupplierId] = React.useState("");
   const [amount, setAmount] = React.useState("");
   const [method, setMethod] = React.useState(METHODS[0]);
   const [date, setDate] = React.useState(() => new Date().toISOString().slice(0, 10));
   const [note, setNote] = React.useState("");
+  const [formError, setFormError] = React.useState(null);
+
+  // সাপ্লায়ারের বকেয়া ইনভয়েসগুলো
+  const [invoices, setInvoices] = React.useState([]);
+  const [invoicesLoading, setInvoicesLoading] = React.useState(false);
+  const [purchaseId, setPurchaseId] = React.useState(""); // "" = auto (oldest due)
+
+  const supplier = suppliers.find((s) => String(s.id) === supplierId);
+
+  // সাপ্লায়ার বদলালে সেই সাপ্লায়ারের বকেয়া ইনভয়েস লিস্ট লোড করা
+  useEffect(() => {
+    setPurchaseId("");
+    setInvoices([]);
+    if (!supplierId) return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        setInvoicesLoading(true);
+        const data = await fetchPurchases({ supplier_id: supplierId, due_only: true, per_page: 100 });
+        if (!cancelled) setInvoices(data.data || []);
+      } catch (err) {
+        console.error("Error loading supplier invoices:", err);
+      } finally {
+        if (!cancelled) setInvoicesLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [supplierId]);
 
   if (!open) return null;
 
-  const supplier = SUPPLIERS.find((s) => String(s.id) === supplierId);
-
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!supplier || !amount) return;
-    onSave({
-      id: `PMT-${Math.floor(2000 + Math.random() * 900)}`,
-      date: date.split("-").reverse().join("-"),
-      supplier: supplier.name,
-      company: supplier.company,
-      phone: supplier.phone,
-      address: supplier.address,
-      invRef: "—",
-      invAmount: Number(amount),
-      invPaidTotal: Number(amount),
-      method,
-      amount: Number(amount),
-      note,
-      paidBy: "You",
-      receivedBy: supplier.name,
-    });
-    setSupplierId("");
-    setAmount("");
-    setNote("");
+    setFormError(null);
+    try {
+      await onSave({
+        supplier_id: supplier.id,
+        ...(purchaseId ? { purchase_id: Number(purchaseId) } : {}),
+        amount: Number(amount),
+        method,
+        note,
+        paid_by: "You",
+        received_by: supplier.name,
+        paid_date: date,
+      });
+      setSupplierId("");
+      setAmount("");
+      setNote("");
+      setPurchaseId("");
+      setInvoices([]);
+    } catch (err) {
+      setFormError(err.message || "পেমেন্ট সেভ করতে সমস্যা হয়েছে।");
+    }
   };
 
   return (
@@ -243,6 +300,12 @@ function AddPaymentModal({ open, onClose, onSave }) {
         </div>
 
         <div className="px-6 py-5 space-y-3.5">
+          {formError && (
+            <div className="rounded-lg px-3 py-2 text-[12.5px]" style={{ backgroundColor: vermillionSoft, color: COLORS.vermillion }}>
+              {formError}
+            </div>
+          )}
+
           <div>
             <label className="text-[11.5px] font-semibold uppercase tracking-wide" style={{ color: COLORS.muted }}>
               Supplier
@@ -254,13 +317,49 @@ function AddPaymentModal({ open, onClose, onSave }) {
               style={{ borderColor: COLORS.line, color: COLORS.ink, backgroundColor: COLORS.paper }}
             >
               <option value="">Select supplier</option>
-              {SUPPLIERS.map((s) => (
+              {suppliers.map((s) => (
                 <option key={s.id} value={s.id}>
-                  {s.name} ({s.company}) — due {s.due.toLocaleString()}
+                  {s.name} ({s.company}) — due {Number(s.due || 0).toLocaleString()}
                 </option>
               ))}
             </select>
           </div>
+
+          {/* Invoice picker — appears once a supplier is chosen */}
+          {supplierId && (
+            <div>
+              <label className="text-[11.5px] font-semibold uppercase tracking-wide" style={{ color: COLORS.muted }}>
+                Apply against invoice
+              </label>
+              {invoicesLoading ? (
+                <div className="flex items-center gap-2 mt-1.5 text-[12.5px]" style={{ color: COLORS.muted }}>
+                  <Loader2 size={13} className="animate-spin" />
+                  Loading invoices...
+                </div>
+              ) : (
+                <>
+                  <select
+                    value={purchaseId}
+                    onChange={(e) => setPurchaseId(e.target.value)}
+                    className="w-full mt-1 rounded-lg px-3 py-2.5 border text-[13px] outline-none"
+                    style={{ borderColor: COLORS.line, color: COLORS.ink, backgroundColor: COLORS.paper }}
+                  >
+                    <option value="">Auto — apply to oldest due invoice</option>
+                    {invoices.map((inv) => (
+                      <option key={inv.id} value={inv.id}>
+                        {inv.invoice_no} — due {Number(inv.due).toLocaleString()} of {Number(inv.total).toLocaleString()}
+                      </option>
+                    ))}
+                  </select>
+                  {invoices.length === 0 && (
+                    <div className="text-[11.5px] mt-1" style={{ color: COLORS.muted }}>
+                      No outstanding invoices for this supplier — this payment won't be linked to a specific invoice.
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -332,10 +431,11 @@ function AddPaymentModal({ open, onClose, onSave }) {
           </button>
           <button
             onClick={handleSave}
-            disabled={!supplier || !amount}
-            className="rounded-lg px-4 py-2 text-[13px] font-semibold text-white disabled:opacity-40"
+            disabled={!supplier || !amount || saving}
+            className="flex items-center gap-1.5 rounded-lg px-4 py-2 text-[13px] font-semibold text-white disabled:opacity-40"
             style={{ backgroundColor: COLORS.magenta }}
           >
+            {saving && <Loader2 size={14} className="animate-spin" />}
             Save payment
           </button>
         </div>
@@ -345,17 +445,100 @@ function AddPaymentModal({ open, onClose, onSave }) {
 }
 
 export function SupplierPaymentPage() {
-  const [payments, setPayments] = React.useState(INITIAL_PAYMENTS);
-  const [query, setQuery] = React.useState("");
-  const [perPage, setPerPage] = React.useState(100);
-  const [selected, setSelected] = React.useState(null);
-  const [addOpen, setAddOpen] = React.useState(false);
+  const [payments, setPayments] = useState([]);
+  const [suppliers, setSuppliers] = useState([]);
+  const [totalCount, setTotalCount] = useState(0);
 
-  const filtered = payments.filter((r) =>
-    [r.supplier, r.company, r.id, r.invRef].join(" ").toLowerCase().includes(query.toLowerCase())
-  );
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
-  const totalPaid = filtered.reduce((sum, r) => sum + r.amount, 0);
+  const [query, setQuery] = useState("");
+  const [perPage, setPerPage] = useState(100);
+  const [page, setPage] = useState(1);
+  const [lastPage, setLastPage] = useState(1);
+
+  const [selected, setSelected] = useState(null);
+  const [addOpen, setAddOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  // পেমেন্ট লিস্ট লোড করা
+  const loadPayments = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const data = await fetchSupplierPayments({
+        search: query || undefined,
+        per_page: perPage,
+        page,
+      });
+      const rows = (data.data || []).map(mapPayment);
+      setPayments(rows);
+      setTotalCount(data.total ?? rows.length);
+      setLastPage(data.last_page ?? 1);
+    } catch (err) {
+      console.error("Error loading supplier payments:", err);
+      setError("পেমেন্ট লিস্ট লোড করতে সমস্যা হয়েছে।");
+    } finally {
+      setLoading(false);
+    }
+  }, [query, perPage, page]);
+
+  useEffect(() => {
+    loadPayments();
+  }, [loadPayments]);
+
+  // সাপ্লায়ার লিস্ট (Add payment মডালের জন্য) — একবারই লোড হয়
+  const loadSuppliers = useCallback(async () => {
+    try {
+      const data = await fetchSuppliers();
+      setSuppliers(data.data || data || []);
+    } catch (err) {
+      console.error("Error loading suppliers:", err);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadSuppliers();
+  }, [loadSuppliers]);
+
+  // সার্চ পরিবর্তন হলে প্রথম পেজে ফিরিয়ে আনা
+  useEffect(() => {
+    setPage(1);
+  }, [query, perPage]);
+
+  const totalPaid = payments.reduce((sum, r) => sum + r.amount, 0);
+  const outstandingSuppliers = suppliers.filter((s) => Number(s.due || 0) > 0).length;
+
+  // নতুন পেমেন্ট সেভ করা
+  const handleSavePayment = async (payload) => {
+    setSaving(true);
+    try {
+      await createSupplierPayment(payload);
+      setAddOpen(false);
+      setPage(1);
+      // পেমেন্ট এবং সাপ্লায়ার (due আপডেট হওয়ার কারণে) — দুটোই রিফ্রেশ করা
+      await Promise.all([loadPayments(), loadSuppliers()]);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // পেমেন্ট ডিলিট করা
+  const handleDeletePayment = async (row) => {
+    if (!window.confirm(`${row.id} পেমেন্টটি ডিলিট করবেন?`)) return;
+    setDeleting(true);
+    try {
+      await deleteSupplierPayment(row.rawId);
+      setSelected(null);
+      await Promise.all([loadPayments(), loadSuppliers()]);
+    } catch (err) {
+      console.error("Error deleting payment:", err);
+      alert("পেমেন্ট ডিলিট করতে সমস্যা হয়েছে।");
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   return (
     <div className="p-6" style={{ backgroundColor: COLORS.paper, fontFamily: FONTS.BODY, minHeight: "100%" }}>
@@ -366,12 +549,12 @@ export function SupplierPaymentPage() {
             Total payments
           </div>
           <div className="text-[22px] font-bold mt-1" style={{ color: COLORS.ink }}>
-            {filtered.length}
+            {totalCount}
           </div>
         </div>
         <div className="rounded-2xl border p-4" style={{ backgroundColor: COLORS.panel, borderColor: COLORS.line }}>
           <div className="text-[11.5px] font-semibold uppercase tracking-wide" style={{ color: COLORS.muted }}>
-            Total amount paid
+            Total amount paid (this page)
           </div>
           <div className="text-[22px] font-bold mt-1" style={{ color: "#1E8A4C", fontFamily: FONTS.MONO }}>
             {totalPaid.toLocaleString()}
@@ -382,7 +565,7 @@ export function SupplierPaymentPage() {
             Outstanding suppliers
           </div>
           <div className="text-[22px] font-bold mt-1" style={{ color: COLORS.vermillion, fontFamily: FONTS.MONO }}>
-            {SUPPLIERS.filter((s) => s.due > 0).length}
+            {outstandingSuppliers}
           </div>
         </div>
       </div>
@@ -446,84 +629,106 @@ export function SupplierPaymentPage() {
 
         {/* Table */}
         <div className="overflow-x-auto">
-          <table className="w-full text-[13px] border-collapse">
-            <thead>
-              <tr>
-                {["Date", "Payment id", "Supplier", "Against invoice", "Method", "Amount"].map((h) => (
-                  <th key={h} className="text-left font-semibold text-[11px] uppercase tracking-wide px-5 py-3 text-white" style={{ backgroundColor: COLORS.magenta }}>
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.slice(0, perPage).map((row) => (
-                <tr key={row.id} onClick={() => setSelected(row)} className="border-b hover:bg-black/[0.02] transition-colors cursor-pointer" style={{ borderColor: COLORS.line }}>
-                  <td className="px-5 py-3.5 align-top whitespace-nowrap" style={{ color: COLORS.ink, fontFamily: FONTS.MONO, fontSize: 12.5 }}>
-                    {row.date}
-                  </td>
-                  <td className="px-5 py-3.5 align-top font-semibold" style={{ color: COLORS.magenta, fontFamily: FONTS.MONO, fontSize: 12.5 }}>
-                    {row.id}
-                  </td>
-                  <td className="px-5 py-3.5 align-top">
-                    <div className="font-semibold hover:underline" style={{ color: COLORS.ink }}>{row.supplier}</div>
-                    <div className="text-[11.5px] mt-0.5" style={{ color: COLORS.muted }}>{row.company}</div>
-                  </td>
-                  <td className="px-5 py-3.5 align-top" style={{ color: COLORS.ink, fontFamily: FONTS.MONO, fontSize: 12.5 }}>
-                    {row.invRef}
-                  </td>
-                  <td className="px-5 py-3.5 align-top">
-                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold" style={{ backgroundColor: "#E9F7EE", color: "#1E8A4C" }}>
-                      {row.method}
-                    </span>
-                  </td>
-                  <td className="px-5 py-3.5 align-top font-bold" style={{ color: "#1E8A4C", fontFamily: FONTS.MONO }}>
-                    {row.amount.toLocaleString()}
-                  </td>
-                </tr>
-              ))}
-              {filtered.length === 0 && (
+          {loading ? (
+            <div className="flex items-center justify-center py-14 gap-2" style={{ color: COLORS.muted }}>
+              <Loader2 className="animate-spin" size={20} />
+              <span>ডাটা লোড হচ্ছে...</span>
+            </div>
+          ) : error ? (
+            <div className="text-center py-10" style={{ color: COLORS.vermillion }}>{error}</div>
+          ) : (
+            <table className="w-full text-[13px] border-collapse">
+              <thead>
                 <tr>
-                  <td colSpan={6} className="px-5 py-12 text-center text-[13px]" style={{ color: COLORS.muted }}>
-                    No payments found.
-                  </td>
+                  {["Date", "Payment id", "Supplier", "Against invoice", "Method", "Amount"].map((h) => (
+                    <th key={h} className="text-left font-semibold text-[11px] uppercase tracking-wide px-5 py-3 text-white" style={{ backgroundColor: COLORS.magenta }}>
+                      {h}
+                    </th>
+                  ))}
                 </tr>
+              </thead>
+              <tbody>
+                {payments.map((row) => (
+                  <tr key={row.rawId} onClick={() => setSelected(row)} className="border-b hover:bg-black/[0.02] transition-colors cursor-pointer" style={{ borderColor: COLORS.line }}>
+                    <td className="px-5 py-3.5 align-top whitespace-nowrap" style={{ color: COLORS.ink, fontFamily: FONTS.MONO, fontSize: 12.5 }}>
+                      {row.date}
+                    </td>
+                    <td className="px-5 py-3.5 align-top font-semibold" style={{ color: COLORS.magenta, fontFamily: FONTS.MONO, fontSize: 12.5 }}>
+                      {row.id}
+                    </td>
+                    <td className="px-5 py-3.5 align-top">
+                      <div className="font-semibold hover:underline" style={{ color: COLORS.ink }}>{row.supplier}</div>
+                      <div className="text-[11.5px] mt-0.5" style={{ color: COLORS.muted }}>{row.company}</div>
+                    </td>
+                    <td className="px-5 py-3.5 align-top" style={{ color: COLORS.ink, fontFamily: FONTS.MONO, fontSize: 12.5 }}>
+                      {row.invRef}
+                    </td>
+                    <td className="px-5 py-3.5 align-top">
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold" style={{ backgroundColor: "#E9F7EE", color: "#1E8A4C" }}>
+                        {row.method}
+                      </span>
+                    </td>
+                    <td className="px-5 py-3.5 align-top font-bold" style={{ color: "#1E8A4C", fontFamily: FONTS.MONO }}>
+                      {row.amount.toLocaleString()}
+                    </td>
+                  </tr>
+                ))}
+                {payments.length === 0 && (
+                  <tr>
+                    <td colSpan={6} className="px-5 py-12 text-center text-[13px]" style={{ color: COLORS.muted }}>
+                      No payments found.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+              {payments.length > 0 && (
+                <tfoot>
+                  <tr style={{ backgroundColor: magentaSoft }}>
+                    <td colSpan={5} className="px-5 py-3 font-bold text-[12px] uppercase tracking-wide" style={{ color: COLORS.ink }}>Total (this page)</td>
+                    <td className="px-5 py-3 font-bold" style={{ color: "#1E8A4C", fontFamily: FONTS.MONO }}>{totalPaid.toLocaleString()}</td>
+                  </tr>
+                </tfoot>
               )}
-            </tbody>
-            {filtered.length > 0 && (
-              <tfoot>
-                <tr style={{ backgroundColor: magentaSoft }}>
-                  <td colSpan={5} className="px-5 py-3 font-bold text-[12px] uppercase tracking-wide" style={{ color: COLORS.ink }}>Total</td>
-                  <td className="px-5 py-3 font-bold" style={{ color: "#1E8A4C", fontFamily: FONTS.MONO }}>{totalPaid.toLocaleString()}</td>
-                </tr>
-              </tfoot>
-            )}
-          </table>
+            </table>
+          )}
         </div>
 
         {/* Footer / pagination */}
         <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-6 py-4 border-t text-[13px]" style={{ borderColor: COLORS.line, color: COLORS.muted }}>
-          <span>Showing 1 to {Math.min(perPage, filtered.length)} of {filtered.length} entries</span>
+          <span>
+            Showing page {page} of {lastPage} — {totalCount} entries total
+          </span>
           <div className="flex items-center gap-1.5">
-            <button className="w-8 h-8 rounded-md border flex items-center justify-center disabled:opacity-40" style={{ borderColor: COLORS.line, color: COLORS.muted }} disabled>
+            <button
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={page <= 1}
+              className="w-8 h-8 rounded-md border flex items-center justify-center disabled:opacity-40"
+              style={{ borderColor: COLORS.line, color: COLORS.muted }}
+            >
               <ChevronLeft size={14} />
             </button>
-            <span className="w-8 h-8 rounded-md flex items-center justify-center font-semibold text-white" style={{ backgroundColor: COLORS.magenta }}>1</span>
-            <button className="w-8 h-8 rounded-md border flex items-center justify-center" style={{ borderColor: COLORS.line, color: COLORS.ink }}>
+            <span className="w-8 h-8 rounded-md flex items-center justify-center font-semibold text-white" style={{ backgroundColor: COLORS.magenta }}>
+              {page}
+            </span>
+            <button
+              onClick={() => setPage((p) => Math.min(lastPage, p + 1))}
+              disabled={page >= lastPage}
+              className="w-8 h-8 rounded-md border flex items-center justify-center disabled:opacity-40"
+              style={{ borderColor: COLORS.line, color: COLORS.ink }}
+            >
               <ChevronRight size={14} />
             </button>
           </div>
         </div>
       </div>
 
-      <PaymentDetailModal row={selected} onClose={() => setSelected(null)} />
+      <PaymentDetailModal row={selected} onClose={() => setSelected(null)} onDelete={handleDeletePayment} deleting={deleting} />
       <AddPaymentModal
         open={addOpen}
         onClose={() => setAddOpen(false)}
-        onSave={(payment) => {
-          setPayments((prev) => [payment, ...prev]);
-          setAddOpen(false);
-        }}
+        onSave={handleSavePayment}
+        suppliers={suppliers}
+        saving={saving}
       />
     </div>
   );

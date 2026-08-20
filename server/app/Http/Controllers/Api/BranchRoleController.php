@@ -17,6 +17,10 @@ class BranchRoleController extends Controller
         'branch.product.purchase.price', 'branch.product.stock', 'branch.received.customer.due',
         'branch.reports', 'branch.return.product', 'branch.sell', 'branch.sell.discount',
         'branch.setting', 'stock.transfer.b2b.b2g', 'stock.transfer.g2b',
+        // CRM — same permission_key strings the api.php route middleware checks
+        // (see EnsurePermission), so granting these to a branch role gives that
+        // branch's staff access to the CRM routes too.
+        'admin.crm', 'admin.crm.sales.view', 'admin.crm.permissions.view', 'admin.crm.permissions.manage',
     ];
 
     public function permissionCatalog()

@@ -13,18 +13,42 @@ class ProductStockController extends Controller
     /** GET /product-stocks — filterable stock ledger (Product Stocks page) */
     public function index(Request $request)
     {
-        $query = Product::with(['category', 'brand', 'stocks']);
+        $branchId = $request->query('branch_id');
 
-        // Filter by Branch (Fix: Filter through relationship)
-        if ($request->filled('branch_id')) {
-            $query->whereHas('stocks', function ($q) use ($request) {
-                $q->where('branch_id', $request->branch_id);
+        // stocks রিলেশন লোড করার সময় branch_id দিয়ে constrain করা হচ্ছে,
+        // নাহলে অন্য ব্রাঞ্চের stock রেকর্ডও চলে আসে এবং global sum ভুলভাবে দেখায়।
+        $query = Product::with([
+            'category',
+            'brand',
+            'stocks' => function ($q) use ($branchId) {
+                if ($branchId) {
+                    $q->where('branch_id', $branchId);
+                }
+            },
+        ]);
+
+        // Filter by Branch — শুধু ওই ব্রাঞ্চে stock record আছে এমন প্রোডাক্ট আসবে
+        if ($branchId) {
+            $query->whereHas('stocks', function ($q) use ($branchId) {
+                $q->where('branch_id', $branchId);
             });
+
+            // নির্দিষ্ট ব্রাঞ্চের কোয়ান্টিটি আলাদা কলামে যোগ করা (branch_stock)
+            $query->withSum(['stocks as branch_stock' => function ($q) use ($branchId) {
+                $q->where('branch_id', $branchId);
+            }], 'quantity');
+        } else {
+            // কোনো ব্রাঞ্চ সিলেক্ট না করা থাকলে সব ব্রাঞ্চ মিলিয়ে মোট স্টক
+            $query->withSum('stocks as branch_stock', 'quantity');
         }
 
-        // Active Stock (>0)
+        // Active Stock (>0) — branch অনুযায়ী হলে branch_stock দিয়ে চেক করা উচিত
         if ($request->boolean('active_only')) {
-            $query->where('stock_qty', '>', 0);
+            if ($branchId) {
+                $query->having('branch_stock', '>', 0);
+            } else {
+                $query->where('stock_qty', '>', 0);
+            }
         }
 
         // Search Filter
@@ -48,9 +72,15 @@ class ProductStockController extends Controller
 
         $allProducts = (clone $query)->get();
 
-        // Calculate Summary
-        $totalPurchaseValue = $allProducts->sum(fn($p) => $p->stock_qty * $p->purchase_price);
-        $totalSaleValue     = $allProducts->sum(fn($p) => $p->stock_qty * $p->selling_price);
+        // Calculate Summary — branch সিলেক্ট থাকলে branch_stock, নাহলে stock_qty (গ্লোবাল)
+        $totalPurchaseValue = $allProducts->sum(function ($p) use ($branchId) {
+            $qty = $branchId ? (int) ($p->branch_stock ?? 0) : ($p->stock_qty ?? 0);
+            return $qty * $p->purchase_price;
+        });
+        $totalSaleValue = $allProducts->sum(function ($p) use ($branchId) {
+            $qty = $branchId ? (int) ($p->branch_stock ?? 0) : ($p->stock_qty ?? 0);
+            return $qty * $p->selling_price;
+        });
 
         $perPage = $request->integer('per_page', 100);
         $paginated = $query->latest()->paginate($perPage);
